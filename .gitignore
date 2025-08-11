@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+*.egg
+
+# Environments
+.venv/
+.env
+.env.*
+
+# VS Code
+.vscode/
+.vscode-insiders/
+.history/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test/coverage
+.coverage
+*.coverage
+htmlcov/
+pytest.cache/
+
+# Node (if present for frontend tooling)
+node_modules/
+
+# Build artifacts
+build/
+dist/
+
+tmp/
+*.tmp
+
+# SQLite DB and app data
+*.db
+*.sqlite
+*.sqlite3
+skald.db
+
+# Library content (ebooks)
+library/
+libraries/
+books/
+Books/
+*.epub
+*.mobi
+*.azw
+*.azw3
+*.pdf
+
+# Cache
+.cache/
+*.cache
+
+# Python bytecode backups
+*$py.class

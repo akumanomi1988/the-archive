@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Skald</title>
+  <meta name="color-scheme" content="light dark" />
+  <style>
+    /* Design tokens */
+    :root {
+      --radius: 12px;
+      --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem; --space-5: 1.5rem; --space-6: 2rem;
+      --shadow-1: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.08);
+      --font-ui: system-ui, -apple-system, "SF Pro Text", Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      --maxw: 1220px;
+    }
+    :root[data-theme="light"] {
+      --bg: #f5f5f7;
+      --panel: #ffffffcc;            /* translucent for glass effect */
+      --panel-solid: #ffffff;
+      --elev: #ffffff;
+      --fg: #0f172a;
+      --muted: #475569;
+      --line: #e5e7eb;
+      --accent: #0a84ff;            /* apple blue */
+      --accent-fg: #ffffff;
+      --chip: #f1f5f9;
+      --chip-fg: #334155;
+      --kbd-bg:#f8fafc; --kbd-fg:#334155; --kbd-br:#e2e8f0;
+    }
+    :root[data-theme="dark"] {
+      --bg: #0d0f14;
+      --panel: #0f172acc;
+      --panel-solid: #0f172a;
+      --elev: #121826;
+      --fg: #e6edf5;
+      --muted: #9aa8bb;
+      --line: #1f2a40;
+      --accent: #0a84ff;
+      --accent-fg: #08111f;
+      --chip: #111a2f;
+      --chip-fg: #b8c6d9;
+      --kbd-bg:#0b1220; --kbd-fg:#cbd5e1; --kbd-br:#1f2a40;
+    }
+
+    /* Base */
+    html, body { height: 100%; }
+    body {
+      margin:0; background: var(--bg); color: var(--fg); font-family: var(--font-ui);
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      display:flex; flex-direction:column; min-height: 100svh; overflow: hidden; /* prevent page scroll */
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-4); }
+
+    /* Glass nav */
+    header {
+      position: sticky; top:0; z-index:10;
+      backdrop-filter: saturate(160%) blur(16px);
+      -webkit-backdrop-filter: saturate(160%) blur(16px);
+      background: var(--panel);
+      border-bottom: 1px solid color-mix(in oklab, var(--panel-solid) 70%, var(--line));
+    }
+    .nav {
+      display:flex; align-items:center; gap: var(--space-4); padding: .9rem 0;
+    }
+    .brand {
+      display:flex; align-items:center; gap:.75rem; font-weight:700; letter-spacing:.2px; font-size:1.1rem;
+    }
+    .logo { width: 28px; height: 28px; border-radius: 8px; background:
+      conic-gradient(from 220deg, var(--accent), #34c759 30%, #30b0f0 55%, #bf5af2 80%, var(--accent) 100%);
+      box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--panel-solid) 75%, transparent);
+    }
+    .toolbar { margin-left:auto; display:flex; align-items:center; gap:.6rem; }
+
+    /* Segmented controls */
+    .seg {
+      display:flex; gap:.25rem; background: color-mix(in oklab, var(--panel-solid) 85%, transparent);
+      color: var(--fg); padding:.25rem; border-radius: 999px; align-items:center;
+      border: 1px solid var(--line);
+    }
+    .seg button, .seg select {
+      background: transparent; color: inherit; border: 0; padding:.45rem .75rem; border-radius: 999px;
+      font: inherit; cursor: pointer; line-height: 1;
+    }
+    .seg button.active { background: var(--accent); color: var(--accent-fg); box-shadow: 0 1px 0 rgba(0,0,0,.1) inset; }
+    .seg select { appearance:none; padding-right: 1.8rem; position: relative; }
+    .seg .chev { margin-left:-1.4rem; pointer-events:none; opacity:.55; }
+
+    /* Filters row */
+    .filters {
+      display:flex; gap:.5rem; flex-wrap: wrap; padding: .9rem 0 1rem;
+      align-items: center;
+    }
+    .pill {
+      background: var(--elev); color: var(--fg); border:1px solid var(--line);
+      border-radius: 999px; padding:.6rem .9rem; outline: none; display:flex; align-items:center; gap:.5rem;
+    }
+    .pill input { background: transparent; border:0; color: inherit; outline:none; min-width: 12ch; }
+  .pill select { background: transparent; border:0; color: inherit; outline:none; min-width: 12ch; font: inherit; }
+  .pill .lbl { font-size: .82rem; color: var(--muted); margin-right: .25rem; white-space: nowrap; }
+    .pill input::placeholder { color: var(--muted); }
+    .btn { border-radius: 999px; padding:.6rem 1rem; border:1px solid var(--line); background: var(--elev); color: var(--fg); cursor:pointer; }
+    .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+    .btn.ghost { background: transparent; }
+    .btn:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent); outline-offset: 2px;
+    }
+
+    /* Main layout */
+  main { padding: var(--space-3) 0 env(safe-area-inset-bottom); flex: 1 1 auto; overflow: hidden; }
+  .grid { display:grid; grid-template-columns: 1.15fr 1fr; gap: var(--space-5); align-items:stretch; height: 100%; min-height: 0; }
+  .wrap.grid { height: 100%; min-height: 0; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+
+    /* Panels */
+    .panel {
+      background: var(--panel-solid); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
+      overflow:hidden; display:flex; flex-direction: column; min-height: 0; height: 100%;
+    }
+    .results { flex: 1 1 auto; overflow:auto; padding: .5rem; -webkit-overflow-scrolling: touch; }
+    .viewer { min-height: 0; height: 100%; display:flex; flex-direction: column; }
+  .viewer-head { padding: .6rem .8rem; border-bottom:1px solid var(--line); display:flex; flex-direction: column; gap:.5rem; }
+  .viewer-head .spacer { flex:1 1 auto; }
+  .controls-row { display:flex; align-items:center; gap:.6rem; flex-wrap: wrap; }
+    .viewer-body { flex: 1 1 auto; min-height: 0; overflow:hidden; padding: .6rem; display:flex; }
+    .reader {
+      width:100%; height: 100%; min-height: 0; border:1px solid var(--line); background: var(--panel-solid);
+      border-radius: 10px; flex: 1 1 auto; color: var(--fg);
+      font-size: var(--reader-font-size, 1rem);
+      line-height: var(--reader-line-height, 1.6);
+      font-family: var(--reader-family, serif);
+      padding: var(--reader-padding, 1.25rem);
+      overflow: auto; -webkit-overflow-scrolling: touch;
+    }
+  .reader.page-mode { scroll-behavior: smooth; scroll-snap-type: y mandatory; }
+  .reader.page-mode * { scroll-snap-align: start; }
+    /* Optional margins for readability */
+    .reader p { margin: 0 0 0.75em; }
+
+    /* Book list */
+    .book {
+      padding: 1rem 1rem; border-bottom: 1px solid var(--line);
+      display:grid; gap:.35rem; transition: transform .18s ease, background-color .18s ease, box-shadow .18s ease;
+    }
+    .book:last-child { border-bottom: none; }
+    .book:hover { background: color-mix(in oklab, var(--panel-solid) 92%, var(--accent) 8%); transform: translateY(-1px); }
+    .book h4 { margin:0; font-size: 1.02rem; line-height: 1.35rem; letter-spacing:.1px; }
+    .meta { font-size:.9rem; color: var(--muted); }
+    .chips { display:flex; gap:.4rem; flex-wrap: wrap; }
+    .chip { background: var(--chip); color: var(--chip-fg); border:1px solid var(--line); padding:.15rem .6rem; border-radius: 999px; font-size:.75rem; }
+
+    .actions { display:flex; gap:.4rem; margin-top:.35rem; flex-wrap: wrap; }
+    .action { padding:.45rem .8rem; border-radius: 999px; border:1px solid var(--line); background: var(--elev); color: var(--fg); cursor: pointer; }
+    .action.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+    .footerbar { padding:.6rem .8rem; border-top:1px solid var(--line); display:flex; align-items:center; gap:.6rem; background: color-mix(in oklab, var(--panel-solid) 92%, transparent); }
+    .spacer { flex: 1 1 auto; }
+    .status { padding:.35rem .6rem; background: var(--chip); color: var(--chip-fg); border:1px solid var(--line); border-radius: 999px; }
+    .kbd{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; padding:.05rem .35rem; border-radius:6px; border:1px solid var(--kbd-br); background:var(--kbd-bg); color:var(--kbd-fg); font-size:.82em;}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;clip:rect(0,0,0,0);white-space:nowrap;border:0;overflow:hidden}
+
+  @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+
+    /* E-reader and high-contrast friendly fallbacks */
+    @media (prefers-contrast: more) {
+      .logo { box-shadow: none; }
+    }
+    @media (forced-colors: active) {
+      header, .panel, .pill, .btn, .action, .chip, .footerbar { border: 1px solid CanvasText; }
+      .btn.primary, .action.primary { background: Highlight; color: HighlightText; }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      header { background: var(--panel-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+    }
+    /* Small screens adjustments */
+    @media (max-width: 600px) {
+      .nav { padding: .6rem 0; }
+      .filters { padding: .6rem 0 .8rem; gap: .4rem; }
+      .pill input { min-width: 10ch; }
+      .grid { gap: var(--space-4); }
+      .btn, .action { padding:.55rem .9rem; }
+      .viewer-body { padding: .75rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap nav">
+      <div class="brand" aria-label="Skald">
+        <div class="logo" aria-hidden="true"></div>
+        <span id="lbl-app">Skald</span>
+      </div>
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Theme toggle">
+          <button id="btn-theme-auto" aria-pressed="true" title="Auto" class="active">A</button>
+          <button id="btn-theme-light" aria-pressed="false" title="Light">☀️</button>
+          <button id="btn-theme-dark" aria-pressed="false" title="Dark">🌙</button>
+        </div>
+        <div class="seg" role="group" aria-label="Language">
+          <select id="lang" aria-label="Language select">
+            <option value="es">ES</option>
+            <option value="en">EN</option>
+            <option value="fr">FR</option>
+            <option value="de">DE</option>
+            <option value="pt">PT</option>
+          </select>
+          <span class="chev">▾</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="wrap filters" role="search">
+      <label class="pill" aria-label="Buscar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="q" placeholder="Buscar..." aria-label="Buscar texto">
+      </label>
+      <label class="pill">
+        <span class="lbl" id="lbl-author">Autor</span>
+        <select id="autor" aria-label="Autor"><option value="">Autor</option></select>
+      </label>
+      <label class="pill"><span class="lbl" id="lbl-title">Título</span><input id="titulo" placeholder="Título" aria-label="Título"></label>
+      <label class="pill">
+        <span class="lbl" id="lbl-genre">Género</span>
+        <select id="genre" aria-label="Género"><option value="">Género</option></select>
+      </label>
+      <label class="pill">
+        <span class="lbl" id="lbl-year-from">Desde</span>
+        <select id="year_from" aria-label="Año desde"></select>
+      </label>
+      <label class="pill">
+        <span class="lbl" id="lbl-year-to">Hasta</span>
+        <select id="year_to" aria-label="Año hasta"></select>
+      </label>
+      <button class="btn primary" id="btnSearch">Buscar</button>
+      <button class="btn" id="btnReindex" title="Reindexar">Reindex</button>
+  <button class="btn" id="btnEnrichAll" title="Enriquecer todos">Enriquecer todo</button>
+  <button class="btn" id="btnEnrichNew" title="Enriquecer nuevos">Enriquecer nuevos</button>
+      <span class="status" id="status">Listo.</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="wrap grid">
+      <section class="panel">
+        <div class="results" id="results">
+          <div id="list"></div>
+        </div>
+        <div class="footerbar">
+          <button class="btn" id="prev">◀</button>
+          <span id="pageinfo" class="meta"></span>
+          <button class="btn" id="next">▶</button>
+          <div class="spacer"></div>
+          <span class="meta"><span id="lbl-tip">Tip:</span> <span class="kbd">Enter</span> <span id="lbl-tip2">to search</span></span>
+        </div>
+      </section>
+
+      <section class="panel viewer" id="viewerPanel">
+        <div class="viewer-head">
+          <div class="meta" id="detail">—</div>
+          <div class="controls-row">
+            <div class="seg" role="group" aria-label="Reader mode">
+              <button id="btnModeScroll" class="active" title="Scroll">Scroll</button>
+              <button id="btnModePaged" title="Páginas">📖</button>
+            </div>
+            <div class="seg" role="group" aria-label="Font size">
+              <button id="btnFontMinus" title="A-">A-</button>
+              <button id="btnFontPlus" title="A+">A+</button>
+            </div>
+            <div class="seg" role="group" aria-label="Font family">
+              <select id="fontFamily" aria-label="Font family">
+                <option value="serif">Serif</option>
+                <option value="Georgia, serif">Georgia</option>
+                <option value="'Palatino Linotype', Palatino, serif">Palatino</option>
+                <option value="'Times New Roman', Times, serif">Times</option>
+                <option value="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">Sans</option>
+                <option value="Helvetica, Arial, sans-serif">Helvetica</option>
+                <option value="Verdana, Geneva, sans-serif">Verdana</option>
+              </select>
+              <span class="chev">▾</span>
+            </div>
+            <div class="seg" role="group" aria-label="Page nav" id="segPageNav">
+              <button id="btnPagePrev" title="Página anterior">◀</button>
+              <button id="btnPageNext" title="Página siguiente">▶</button>
+            </div>
+            <button class="btn" id="btnFullscreen" title="Pantalla completa">⛶</button>
+          </div>
+        </div>
+        <div class="viewer-body">
+          <div id="reader" class="reader scroll-mode" tabindex="0" role="document"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    // Base URL (file:// fallback)
+    const base = (location.protocol === 'file:') ? 'http://localhost:8000' : '';
+    const api = (p) => `${base}${p}`;
+
+    // i18n
+    const I18N = {
+  es:{appName:"Skald",searchPlaceholder:"Buscar... (título o autor)",authorPlaceholder:"Autor",titlePlaceholder:"Título",genrePlaceholder:"Género",yearFromPlaceholder:"Año desde",yearToPlaceholder:"Año hasta",search:"Buscar",reindex:"Reindex",ready:"Listo.",searching:"Buscando...",done:"Hecho.",error:"Error",open:"Abrir",download:"Descargar",enrich:"Enriquecer",enrichAll:"Enriquecer todo",enrichNew:"Enriquecer nuevos",enriching:"Enriqueciendo...",enrichingAll:"Enriqueciendo en lote...",enriched:"Enriquecido",started:"Iniciado",progress:"Progreso",pageInfo:"Página {page} / {pages} • {total} resultados",tip:"Atajo:",tip2:"para buscar",reindexing:"Reindexando...",reindexed:"Reindex completo."},
+  en:{appName:"Skald",searchPlaceholder:"Search... (title or author)",authorPlaceholder:"Author",titlePlaceholder:"Title",genrePlaceholder:"Genre",yearFromPlaceholder:"Year from",yearToPlaceholder:"Year to",search:"Search",reindex:"Reindex",ready:"Ready.",searching:"Searching...",done:"Done.",error:"Error",open:"Open",download:"Download",enrich:"Enrich",enrichAll:"Enrich all",enrichNew:"Enrich new",enriching:"Enriching...",enrichingAll:"Batch enriching...",enriched:"Enriched",started:"Started",progress:"Progress",pageInfo:"Page {page} / {pages} • {total} results",tip:"Tip:",tip2:"to search",reindexing:"Reindexing...",reindexed:"Reindex complete."},
+  fr:{appName:"Skald",searchPlaceholder:"Rechercher... (titre ou auteur)",authorPlaceholder:"Auteur",titlePlaceholder:"Titre",genrePlaceholder:"Genre",yearFromPlaceholder:"Année min",yearToPlaceholder:"Année max",search:"Rechercher",reindex:"Réindexer",ready:"Prêt.",searching:"Recherche...",done:"Terminé.",error:"Erreur",open:"Ouvrir",download:"Télécharger",enrich:"Enrichir",enrichAll:"Tout enrichir",enrichNew:"Nouveaux",enriching:"Enrichissement...",enrichingAll:"Enrichissement par lot...",enriched:"Enrichi",started:"Démarré",progress:"Progression",pageInfo:"Page {page} / {pages} • {total} résultats",tip:"Astuce :",tip2:"pour rechercher",reindexing:"Réindexation...",reindexed:"Réindexation terminée."},
+  de:{appName:"Skald",searchPlaceholder:"Suchen... (Titel oder Autor)",authorPlaceholder:"Autor",titlePlaceholder:"Titel",genrePlaceholder:"Genre",yearFromPlaceholder:"Jahr von",yearToPlaceholder:"Jahr bis",search:"Suchen",reindex:"Reindizieren",ready:"Bereit.",searching:"Suche...",done:"Fertig.",error:"Fehler",open:"Öffnen",download:"Herunterladen",enrich:"Anreichern",enrichAll:"Alle anreichern",enrichNew:"Neue anreichern",enriching:"Anreicherung...",enrichingAll:"Stapel-Anreicherung...",enriched:"Angereichert",started:"Gestartet",progress:"Fortschritt",pageInfo:"Seite {page} / {pages} • {total} Ergebnisse",tip:"Tipp:",tip2:"zum Suchen",reindexing:"Reindizierung...",reindexed:"Reindizierung abgeschlossen."},
+  pt:{appName:"Skald",searchPlaceholder:"Pesquisar... (título ou autor)",authorPlaceholder:"Autor",titlePlaceholder:"Título",genrePlaceholder:"Gênero",yearFromPlaceholder:"Ano de",yearToPlaceholder:"Ano até",search:"Buscar",reindex:"Reindexar",ready:"Pronto.",searching:"Buscando...",done:"Concluído.",error:"Erro",open:"Abrir",download:"Baixar",enrich:"Enriquecer",enrichAll:"Enriquecer tudo",enrichNew:"Enriquecer novos",enriching:"Enriquecendo...",enrichingAll:"Enriquecimento em lote...",enriched:"Enriquecido",started:"Iniciado",progress:"Progresso",pageInfo:"Página {page} / {pages} • {total} resultados",tip:"Dica:",tip2:"para buscar",reindexing:"Reindexando...",reindexed:"Reindex concluído."}
+    };
+    let LANG = 'es'; const LANG_KEY = 'skald.lang';
+    function t(key, params={}){ const d = I18N[LANG] || I18N.es; let s = (d[key] ?? I18N.es[key] ?? key); for (const [k,v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v); return s; }
+    function applyI18n(){
+      document.documentElement.lang = LANG;
+      document.getElementById('lbl-app').textContent = t('appName');
+      document.getElementById('q').placeholder = t('searchPlaceholder');
+  // Visible labels
+  document.getElementById('lbl-author').textContent = t('authorPlaceholder');
+  document.getElementById('lbl-title').textContent = t('titlePlaceholder');
+  document.getElementById('lbl-genre').textContent = t('genrePlaceholder');
+  document.getElementById('lbl-year-from').textContent = t('yearFromPlaceholder');
+  document.getElementById('lbl-year-to').textContent = t('yearToPlaceholder');
+  // placeholders for selects are first options
+      document.getElementById('titulo').placeholder = t('titlePlaceholder');
+  document.querySelector('#autor option').textContent = t('authorPlaceholder');
+  document.querySelector('#genre option').textContent = t('genrePlaceholder');
+      document.getElementById('btnSearch').textContent = t('search');
+      document.getElementById('btnReindex').textContent = t('reindex');
+  document.getElementById('btnEnrichAll').textContent = t('enrichAll');
+  document.getElementById('btnEnrichNew').textContent = t('enrichNew');
+      document.getElementById('status').textContent = t('ready');
+      document.getElementById('lbl-tip').textContent = t('tip');
+      document.getElementById('lbl-tip2').textContent = t('tip2');
+      renderList({total: state.total, items: state.items, page: state.page, page_size: state.page_size});
+    }
+    function setLang(l){ if (!I18N[l]) return; LANG = l; localStorage.setItem(LANG_KEY, l); document.getElementById('lang').value = l; applyI18n(); }
+    function initLang(){ const saved = localStorage.getItem(LANG_KEY); const nav = (navigator.language || 'es').slice(0,2).toLowerCase(); setLang(saved || (I18N[nav] ? nav : 'es')); }
+
+    // Theme (dark/light/auto)
+    const THEME_KEY = 'skald.theme';
+    let mediaDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+    function setTheme(theme){
+      localStorage.setItem(THEME_KEY, theme);
+      const t = theme === 'auto' ? (mediaDark && mediaDark.matches ? 'dark' : 'light') : theme;
+      document.documentElement.setAttribute('data-theme', t);
+      // segmented state
+      document.getElementById('btn-theme-auto').classList.toggle('active', theme==='auto');
+      document.getElementById('btn-theme-light').classList.toggle('active', theme==='light');
+      document.getElementById('btn-theme-dark').classList.toggle('active', theme==='dark');
+      document.getElementById('btn-theme-auto').setAttribute('aria-pressed', theme==='auto');
+      document.getElementById('btn-theme-light').setAttribute('aria-pressed', theme==='light');
+      document.getElementById('btn-theme-dark').setAttribute('aria-pressed', theme==='dark');
+    }
+    function initTheme(){
+      const saved = localStorage.getItem(THEME_KEY) || 'auto';
+      setTheme(saved);
+      if (mediaDark) {
+        mediaDark.addEventListener ? mediaDark.addEventListener('change', () => {
+          if ((localStorage.getItem(THEME_KEY) || 'auto') === 'auto') setTheme('auto');
+        }) : mediaDark.addListener(() => { if ((localStorage.getItem(THEME_KEY) || 'auto') === 'auto') setTheme('auto'); });
+      }
+    }
+
+    // State
+    let state = { page: 1, page_size: 20, total: 0, items: [], lastQuery: {} };
+
+    // Fetch helper
+    async function fetchJSON(url, opts={}) {
+      const res = await fetch(url, { ...opts });
+      if (!res.ok) throw new Error(await res.text());
+      const ct = res.headers.get('content-type') || '';
+      return ct.includes('application/json') ? res.json() : res.text();
+    }
+
+    // Query builder
+    function buildQuery() {
+      const q = document.querySelector('#q').value.trim();
+  const autor = document.querySelector('#autor').value.trim();
+      const titulo = document.querySelector('#titulo').value.trim();
+      const genre = document.querySelector('#genre').value.trim();
+  const year_from = document.querySelector('#year_from').value;
+  const year_to = document.querySelector('#year_to').value;
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (autor) params.set('autor', autor);
+      if (titulo) params.set('titulo', titulo);
+      if (genre) params.set('genre', genre);
+      if (year_from) params.set('year_from', year_from);
+      if (year_to) params.set('year_to', year_to);
+      params.set('page', state.page);
+      params.set('page_size', state.page_size);
+      return params.toString();
+    }
+
+    // Rendering
+    function escapeHtml(s){ return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+    function renderList(data) {
+      state.total = data.total ?? 0; state.items = data.items || []; state.page = data.page ?? 1; state.page_size = data.page_size ?? 20;
+      const list = document.querySelector('#list');
+      list.innerHTML = '';
+      state.items.forEach(b => {
+        const div = document.createElement('div'); div.className = 'book';
+        const sizeKB = b.size_bytes ? Math.max(1, Math.round(b.size_bytes/1024)) : '';
+        const metaLine = [b.language, b.genre, (b.year || '')].filter(Boolean).join(' • ');
+        div.innerHTML = `
+          <h4>${escapeHtml(b.title)} <span class="meta">— ${escapeHtml(b.author)}</span></h4>
+          <div class="meta">${metaLine} ${sizeKB ? ' • ' + sizeKB + ' KB' : ''}</div>
+          <div class="chips">${b.tags?.slice?.(0,4)?.map(tag => `<span class="chip">${escapeHtml(tag)}</span>`).join('') || ''}</div>
+          <div class="actions">
+            <button class="action primary" data-open="${b.id}">${t('open')}</button>
+            <a class="action" href="${api(`/download/${b.id}`)}" target="_blank" rel="noopener">${t('download')}</a>
+            <button class="action" data-enrich="${b.id}">${t('enrich')}</button>
+          </div>`;
+        list.appendChild(div);
+      });
+      document.querySelector('#pageinfo').textContent =
+        t('pageInfo', { page: state.page, pages: Math.max(1, Math.ceil(state.total/state.page_size)), total: state.total });
+    }
+
+    // Interactions
+    function setStatus(text) { document.querySelector('#status').textContent = text; }
+    async function search() {
+      const qs = buildQuery(); const url = api(`/books?${qs}`);
+      setStatus(t('searching'));
+      try { const data = await fetchJSON(url); renderList(data); setStatus(t('done')); }
+      catch (e) { console.error(e); setStatus(`${t('error')}: ${e.message}`); }
+    }
+    async function openBook(id) {
+        currentBookId = String(id);
+      const reader = document.querySelector('#reader');
+      setReaderHTML('<div class="meta">Cargando…</div>');
+        try { const html = await fetchJSON(api(`/open/${id}`)); setReaderHTML(html); applyReaderPrefs(); } catch(e) { setReaderHTML(`<pre>${(e && e.message) || 'Error'}</pre>`); }
+        try {
+          const detail = await fetchJSON(api(`/books/${id}`));
+          document.querySelector('#detail').textContent = `${detail.title} — ${detail.author}`;
+          // Reset page info suffix for new book
+          lastDetailBase = `${detail.title} — ${detail.author}`;
+          updatePageInfo(true);
+        } catch {}
+        // Restore last position for this book after loading content and applying prefs
+        restoreProgress();
+      if (window.innerWidth < 1100) document.querySelector('.viewer').scrollIntoView({ behavior:'smooth', block:'start' });
+    }
+    async function enrich(id) {
+      setStatus(t('enriching'));
+      try { const res = await fetchJSON(api(`/enrich/${id}`), { method: 'POST' }); setStatus(`${t('enriched')}: ${res.status ?? 'ok'}`); await search(); }
+      catch(e){ setStatus(`${t('error')}: ${e.message}`); }
+    }
+
+    // Enrich All / New
+    let enrichPoll = null;
+    async function pollEnrichStatus() {
+      try {
+        const s = await fetchJSON(api('/enrich/status'));
+        if (s && s.running) {
+          const total = s.total ?? 0, processed = s.processed ?? 0, ok = s.updated ?? 0, failed = s.failed ?? 0;
+          setStatus(`${t('enrichingAll')} ${processed}/${total} • ok:${ok} • x:${failed}`);
+        } else {
+          if (s && s.total != null) {
+            const total = s.total ?? 0, processed = s.processed ?? 0, ok = s.updated ?? 0, failed = s.failed ?? 0;
+            setStatus(`${t('done')} • ${processed}/${total} • ok:${ok} • x:${failed}`);
+          } else {
+            setStatus(t('done'));
+          }
+          if (enrichPoll) { clearInterval(enrichPoll); enrichPoll = null; }
+          await search();
+        }
+      } catch (e) { /* ignore transient errors */ }
+    }
+    async function enrichAll(opts) {
+      setStatus(t('enrichingAll'));
+      try {
+        const res = await fetchJSON(api('/enrich/all'), {
+          method: 'POST', headers: {'content-type':'application/json'},
+          body: JSON.stringify({ only_pending: true, throttle_ms: 250, ...opts })
+        });
+        if (res && res.status === 'started') {
+          setStatus(`${t('started')} • ${t('enrichingAll')}`);
+          if (!enrichPoll) enrichPoll = setInterval(pollEnrichStatus, 1500);
+        } else if (res && res.status === 'already_running') {
+          if (!enrichPoll) enrichPoll = setInterval(pollEnrichStatus, 1500);
+        } else {
+          setStatus(t('done'));
+        }
+      } catch (e) {
+        setStatus(`${t('error')}: ${e.message}`);
+      }
+    }
+
+    // Events
+    document.getElementById('btnSearch').addEventListener('click', () => { state.page = 1; search(); });
+    document.getElementById('prev').addEventListener('click', () => { if (state.page>1){ state.page--; search(); }});
+    document.getElementById('next').addEventListener('click', () => { const max = Math.ceil(state.total/state.page_size); if (state.page<max){ state.page++; search(); }});
+    document.getElementById('btnReindex').addEventListener('click', async () => {
+      setStatus(t('reindexing'));
+      try { await fetchJSON(api('/reindex'), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({mode:'sync'}) });
+        setStatus(t('reindexed')); search();
+      } catch(e){ setStatus(`${t('error')}: ${e.message}`); }
+    });
+    document.getElementById('btnEnrichAll').addEventListener('click', async () => {
+      enrichAll({ only_pending: true });
+    });
+    document.getElementById('btnEnrichNew').addEventListener('click', async () => {
+      enrichAll({ only_never: true });
+    });
+    document.addEventListener('click', (e) => {
+      const tEl = e.target.closest('button, a');
+      if (!tEl) return;
+      if (tEl.tagName === 'BUTTON' && tEl.dataset.open) openBook(tEl.dataset.open);
+      if (tEl.tagName === 'BUTTON' && tEl.dataset.enrich) enrich(tEl.dataset.enrich);
+    });
+    document.addEventListener('keydown', (e)=>{ if (e.key === 'Enter' && ['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) { e.preventDefault(); state.page = 1; search(); }});
+
+    // Theme + language init
+    document.getElementById('btn-theme-auto').addEventListener('click', ()=>setTheme('auto'));
+    document.getElementById('btn-theme-light').addEventListener('click', ()=>setTheme('light'));
+    document.getElementById('btn-theme-dark').addEventListener('click', ()=>setTheme('dark'));
+    document.getElementById('lang').addEventListener('change', (e)=> setLang(e.target.value));
+
+    initTheme();
+    initLang();
+    applyI18n();
+    // Load filters then search (wrap async work to avoid top-level await)
+    (async () => {
+      try {
+        const filters = await fetchJSON(api('/filters'));
+        const selAutor = document.getElementById('autor');
+        selAutor.innerHTML = `<option value="">${t('authorPlaceholder')}</option>` + (filters.authors||[]).map(a=>`<option value="${a}">${a}</option>`).join('');
+        const selGenre = document.getElementById('genre');
+        selGenre.innerHTML = `<option value="">${t('genrePlaceholder')}</option>` + (filters.genres||[]).map(g=>`<option value="${g}">${g}</option>`).join('');
+        const selFrom = document.getElementById('year_from');
+        const selTo = document.getElementById('year_to');
+        const minY = filters.min_year ?? '';
+        const curY = filters.current_year ?? new Date().getFullYear();
+        let years = [];
+        if (minY) { for (let y=curY; y>=minY; y--) years.push(y); }
+        else { for (let y=curY; y>=1900; y--) years.push(y); }
+        // Default empty options hinting the range, but with empty value to avoid filtering by default
+        selFrom.innerHTML = `<option value="">${t('yearFromPlaceholder')}${minY?': '+minY:''}</option>` + years.slice().reverse().map(y=>`<option value="${y}">${y}</option>`).join('');
+        selTo.innerHTML = `<option value="">${t('yearToPlaceholder')}${curY?': '+curY:''}</option>` + years.map(y=>`<option value="${y}">${y}</option>`).join('');
+        selFrom.value = '';
+        selTo.value = '';
+      } catch(e) { /* ignore */ }
+      // Always perform an initial search
+      search();
+    })();
+
+  // -------- Reader controls --------
+  const READER_PREFS_KEY = 'skald.reader';
+  const PROGRESS_KEY = 'skald.progress';
+  let readerPrefs = { mode: 'scroll', fontSize: 1.0, family: 'serif', lineHeight: 1.6, padding: 1.25 };
+  let lastDetailBase = '—';
+  let currentBookId = null;
+  function loadProgressMap(){ try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; } }
+  function saveProgressMap(map){ try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(map)); } catch {} }
+  function getProgress(bookId){ const m = loadProgressMap(); return m && m[bookId] || null; }
+  function setProgress(bookId, part){ const m = loadProgressMap(); const prev = m[bookId] || {}; m[bookId] = { ...prev, ...part, ts: Date.now() }; saveProgressMap(m); }
+  function loadReaderPrefs(){ try { const s = JSON.parse(localStorage.getItem(READER_PREFS_KEY) || '{}'); readerPrefs = { ...readerPrefs, ...s }; } catch{} }
+  function saveReaderPrefs(){ localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs)); }
+  function applyReaderPrefs(){
+    const r = document.getElementById('reader'); if (!r) return;
+    r.style.setProperty('--reader-font-size', `${readerPrefs.fontSize}rem`);
+    r.style.setProperty('--reader-line-height', String(readerPrefs.lineHeight));
+    r.style.setProperty('--reader-family', readerPrefs.family);
+    r.style.setProperty('--reader-padding', `${readerPrefs.padding}rem`);
+    r.classList.toggle('page-mode', readerPrefs.mode==='paged');
+    r.classList.toggle('scroll-mode', readerPrefs.mode!=='paged');
+    // Show/hide page nav segment depending on mode
+    const seg = document.getElementById('segPageNav');
+    if (seg) seg.style.display = readerPrefs.mode==='paged' ? 'flex' : 'none';
+    document.getElementById('btnModeScroll').classList.toggle('active', readerPrefs.mode!=='paged');
+    document.getElementById('btnModePaged').classList.toggle('active', readerPrefs.mode==='paged');
+  // Try to restore approximate position after visual changes
+  restoreProgress();
+  updatePageInfo(true);
+  }
+  function setReaderHTML(html){ const r = document.getElementById('reader'); if (!r) return; r.innerHTML = html; r.scrollTop = 0; updatePageInfo(); }
+  function pageNext(){ const r = document.getElementById('reader'); if (!r) return; const delta = r.clientHeight; r.scrollBy({ top: delta, behavior: 'smooth' }); setTimeout(updatePageInfo, 200); }
+  function pagePrev(){ const r = document.getElementById('reader'); if (!r) return; const delta = r.clientHeight; r.scrollBy({ top: -delta, behavior: 'smooth' }); setTimeout(updatePageInfo, 200); }
+  function updatePageInfo(reset=false){
+    const r = document.getElementById('reader'); if (!r) return;
+    const base = lastDetailBase || document.getElementById('detail').textContent.replace(/\s*•\s*Página\s+\d+\/\d+$/, '');
+    if (readerPrefs.mode !== 'paged') { document.getElementById('detail').textContent = base; return; }
+    const total = Math.max(1, Math.ceil(r.scrollHeight / r.clientHeight));
+    const current = Math.min(total, Math.max(1, Math.floor(r.scrollTop / r.clientHeight) + 1));
+    document.getElementById('detail').textContent = `${base} • Página ${current}/${total}`;
+  }
+  function captureProgress(){
+    if (!currentBookId) return;
+    const r = document.getElementById('reader'); if (!r) return;
+    const maxScroll = Math.max(1, r.scrollHeight - r.clientHeight);
+    const percent = Math.max(0, Math.min(1, r.scrollTop / maxScroll));
+    if (readerPrefs.mode === 'paged') {
+      const total = Math.max(1, Math.ceil(r.scrollHeight / r.clientHeight));
+      const current = Math.min(total, Math.max(1, Math.floor(r.scrollTop / r.clientHeight) + 1));
+      setProgress(currentBookId, { paged: { page: current, percent }, lastMode: 'paged' });
+    } else {
+      setProgress(currentBookId, { scroll: { scrollTop: r.scrollTop, percent }, lastMode: 'scroll' });
+    }
+  }
+  function restoreProgress(){
+    if (!currentBookId) return;
+    const r = document.getElementById('reader'); if (!r) return;
+    const p = getProgress(currentBookId);
+    if (!p) return;
+    if (readerPrefs.mode === 'paged' && p.paged) {
+      const page = Math.max(1, p.paged.page|0);
+      const target = (page - 1) * r.clientHeight;
+      r.scrollTop = target;
+    } else if (readerPrefs.mode !== 'paged' && p.scroll) {
+      const maxScroll = Math.max(0, r.scrollHeight - r.clientHeight);
+      let target = typeof p.scroll.scrollTop === 'number' ? p.scroll.scrollTop : Math.round((p.scroll.percent || 0) * maxScroll);
+      target = Math.max(0, Math.min(maxScroll, target));
+      r.scrollTop = target;
+    }
+    updatePageInfo(true);
+  }
+  // Fullscreen toggle
+  function toggleFullscreen(){
+    const el = document.getElementById('viewerPanel');
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  }
+  // Buttons
+  document.getElementById('btnModeScroll').addEventListener('click', ()=>{ readerPrefs.mode='scroll'; saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('btnModePaged').addEventListener('click', ()=>{ readerPrefs.mode='paged'; saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('btnFontPlus').addEventListener('click', ()=>{ readerPrefs.fontSize = Math.min(2.0, +(readerPrefs.fontSize + 0.1).toFixed(2)); saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('btnFontMinus').addEventListener('click', ()=>{ readerPrefs.fontSize = Math.max(0.7, +(readerPrefs.fontSize - 0.1).toFixed(2)); saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('fontFamily').addEventListener('change', (e)=>{ readerPrefs.family = e.target.value; saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('btnPageNext').addEventListener('click', pageNext);
+  document.getElementById('btnPagePrev').addEventListener('click', pagePrev);
+  document.getElementById('btnFullscreen').addEventListener('click', toggleFullscreen);
+  document.getElementById('reader').addEventListener('scroll', ()=>{ captureProgress(); if (readerPrefs.mode==='paged') updatePageInfo(); });
+  // Disable wheel scroll in paged mode, use it for page navigation
+  document.getElementById('reader').addEventListener('wheel', (e)=>{
+    if (readerPrefs.mode==='paged') { e.preventDefault(); if (e.deltaY > 0) pageNext(); else if (e.deltaY < 0) pagePrev(); }
+  }, { passive: false });
+  document.addEventListener('keydown', (e)=>{ if (readerPrefs.mode==='paged' && ['ArrowRight','PageDown'].includes(e.key)) { e.preventDefault(); pageNext(); } if (readerPrefs.mode==='paged' && ['ArrowLeft','PageUp'].includes(e.key)) { e.preventDefault(); pagePrev(); } });
+  loadReaderPrefs(); applyReaderPrefs();
+  </script>
+</body>
+</html>

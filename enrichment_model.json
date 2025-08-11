@@ -1,0 +1,18 @@
+{
+  "genre": null,
+  "year": null,
+  "series": null,
+  "series_number": null,
+  "audience": null,
+  "tags": [],
+  "content_warnings": [],
+  "premise": null,
+  "confidence": null,
+  "localized": {
+    "es": { "premise": null, "tags": [] },
+    "en": { "premise": null, "tags": [] },
+    "fr": { "premise": null, "tags": [] },
+    "de": { "premise": null, "tags": [] },
+    "pt": { "premise": null, "tags": [] }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "library_path": "./library",
+  "db_path": "./skald.db",
+  "lm_enabled": true,
+  "lm_url": "http://127.0.0.1:1234/v1/chat/completions",
+  "lm_timeout": 15.0,
+  "lm_mock": false,
+  "lm_model": "openai/gpt-oss-20",
+  "cors_origins": ["*"],
+  "page_size_default": 20,
+  "enrichment_batch_size": 10
+}

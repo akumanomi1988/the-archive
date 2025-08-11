@@ -406,6 +406,8 @@
       align-items: center;
       padding-top: 0.5rem;
       border-top: 1px solid var(--line);
+      z-index: 10; /* Asegurar que esté encima */
+      position: relative; /* Para que z-index funcione */
     }
     .action { 
       padding: 0.5rem 1rem; 
@@ -423,6 +425,8 @@
       transition: all 0.15s ease;
       min-height: 36px;
       box-sizing: border-box;
+      z-index: 10; /* Asegurar que esté encima */
+      position: relative; /* Para que z-index funcione */
     }
     .action:hover { 
       background: var(--accent); 
@@ -954,13 +958,13 @@
               ${progressBar}
               ${enrichedTags ? `<div class="chips">${enrichedTags}</div>` : ''}
               <div class="actions">
-                <a class="action primary" href="${api(`/download/${b.id}`)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+                <a class="action primary" href="${api(`/download/${b.id}`)}" target="_blank" rel="noopener">
                   <span class="action-icon">⬇️</span> ${t('download')}
                 </a>
-                <button class="action" data-enrich="${b.id}" onclick="event.stopPropagation()">
+                <button class="action" data-enrich="${b.id}">
                   <span class="action-icon">${enrichmentIcon}</span> ${t('enrich')}
                 </button>
-                <button class="action ghost" data-info="${b.id}" onclick="event.stopPropagation()">
+                <button class="action ghost" data-info="${b.id}">
                   <span class="action-icon">ℹ️</span> Info
                 </button>
               </div>`;
@@ -1224,6 +1228,8 @@
     }
     async function enrich(id) {
       setStatus(t('enriching'));
+      console.log('Enriching book ID:', id);
+      
       // Encontrar la ficha del libro y añadir clase de carga
       const bookCard = document.querySelector(`[data-book-id="${id}"]`);
       if (bookCard) {
@@ -1232,10 +1238,12 @@
       
       try { 
         const res = await fetchJSON(api(`/enrich/${id}`), { method: 'POST' }); 
+        console.log('Enrich response:', res);
         setStatus(`${t('enriched')}: ${res.status ?? 'ok'}`); 
         await performSearch(); // Usar performSearch en lugar de search
         showMessage('Libro enriquecido correctamente', 'success');
       } catch(e) { 
+        console.error('Enrich error:', e);
         setStatus(`${t('error')}: ${e.message}`); 
         showMessage(`Error al enriquecer: ${e.message}`, 'error');
       } finally {
@@ -1275,9 +1283,9 @@
         });
         if (res && res.status === 'started') {
           setStatus(`${t('started')} • ${t('enrichingAll')}`);
-          if (!enrichPoll) enrichPoll = setInterval(pollEnrichStatus, 1500);
+          if (!enrichPoll) enrichPoll = setInterval(pollEnrichStatus, 30000); // 30 segundos
         } else if (res && res.status === 'already_running') {
-          if (!enrichPoll) enrichPoll = setInterval(pollEnrichStatus, 1500);
+          if (!enrichPoll) enrichPoll = setInterval(pollEnrichStatus, 30000); // 30 segundos
         } else {
           setStatus(t('done'));
         }
@@ -1330,14 +1338,26 @@
         return;
       }
       
-      // Book actions - buscar el elemento más cercano con data attributes
-      const target = e.target.closest('button[data-enrich], button[data-info]');
+      // Book actions - buscar el elemento más cercano con data attributes o enlaces de descarga
+      const target = e.target.closest('button[data-enrich], button[data-info], a.action');
       if (target) {
         e.stopPropagation();
+        e.preventDefault();
+        
+        console.log('Action clicked:', target);
+        
         if (target.dataset.enrich) {
+          console.log('Enriching book ID:', target.dataset.enrich);
           await enrich(parseInt(target.dataset.enrich));
         } else if (target.dataset.info) {
+          console.log('Showing info for book ID:', target.dataset.info);
           await showBookInfo(parseInt(target.dataset.info));
+        } else if (target.matches('a.action')) {
+          // Para enlaces de descarga, permitir el comportamiento normal
+          e.stopPropagation();
+          // No preventDefault() para permitir la descarga
+          window.open(target.href, '_blank', 'noopener');
+          return;
         }
         return;
       }

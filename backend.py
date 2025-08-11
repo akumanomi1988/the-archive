@@ -49,7 +49,7 @@ class AppConfig(BaseModel):
     library_path: str = Field(default=str(Path.cwd() / "library"))
     db_path: str = Field(default=str(Path.cwd() / "skald.db"))
     lm_enabled: bool = False
-    lm_url: str = "http://localhost:1234/api/predict"
+    lm_url: str = "http://localhost:1234/v1/chat/completions"
     lm_timeout: float = 90.0  # Aumentado a 90 segundos para modelos lentos
     lm_mock: bool = True
     cors_origins: List[str] = Field(default_factory=lambda: ["*"])
@@ -404,6 +404,122 @@ class LMClient:
         except Exception as e:
             LOGGER.debug("Could not load enrichment_model.json: %s", e)
 
+    def _build_simple_prompt(self, author: str, title: str) -> str:
+        """Simple prompt without complex JSON schema."""
+        return f"""Analyze this book and return basic metadata as simple JSON:
+
+Author: "{author}"
+Title: "{title}"
+
+Return this JSON structure (replace with actual data or null if unknown):
+{{
+  "genre": "Fantasy",
+  "year": 2020,
+  "audience": "adult",
+  "confidence": 0.8,
+  "tags": ["fantasy", "adventure"],
+  "premise": "Brief summary without spoilers..."
+}}
+
+Rules:
+- audience must be one of: "children", "young_adult", "adult", "general"
+- confidence is 0.0 to 1.0 (your certainty about the info)
+- tags are short keywords (max 5)
+- Use null for unknown values
+- NO explanations, ONLY the JSON"""
+
+    def _mock_enrichment(self) -> Dict[str, Any]:
+        """Mock enrichment data for testing."""
+        return {
+            "genre": "Unknown",
+            "year": None,
+            "audience": "general",
+            "confidence": 0.5,
+            "tags": ["mock"],
+            "premise": "Mock enrichment data for testing.",
+        }
+
+    def enrich_simple(self, author: str, title: str) -> Tuple[Optional[Dict[str, Any]], str]:
+        """Simplified enrichment method."""
+        if not self.enabled:
+            return None, "disabled"
+        if not self.model:
+            return None, "no_model"
+        
+        if self.mock:
+            return self._mock_enrichment(), "ok"
+        
+        now_iso = datetime.now(timezone.utc).isoformat()
+        tries = 3
+        
+        # Simple URL construction
+        base_url = self.base_url.rstrip('/')
+        if not base_url.endswith('/v1/chat/completions'):
+            base_url = base_url + '/v1/chat/completions'
+            
+        LOGGER.info("LM enrich for '%s' by %s using %s", title, author, base_url)
+        
+        for attempt in range(1, tries + 1):
+            try:
+                prompt = self._build_simple_prompt(author, title)
+                
+                payload = {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": "You are a librarian. Respond with ONLY valid JSON, no explanations."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 600
+                }
+                
+                LOGGER.info("LM prompt sent:\n%s", prompt)
+                
+                with httpx.Client(timeout=self.timeout) as client:
+                    with lm_rate_limit():
+                        resp = client.post(base_url, json=payload, 
+                                         headers={"Content-Type": "application/json"})
+                
+                LOGGER.info("LM response status: %d", resp.status_code)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    LOGGER.info("LM raw response:\n%s", content)
+                    
+                    # Parse JSON
+                    try:
+                        result = json.loads(content) if isinstance(content, str) else content
+                    except json.JSONDecodeError:
+                        # Try to extract JSON from text
+                        import re
+                        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                        if json_match:
+                            result = json.loads(json_match.group())
+                        else:
+                            raise ValueError("No valid JSON found in response")
+                    
+                    # Basic validation
+                    if not isinstance(result, dict):
+                        raise ValueError("Response is not a JSON object")
+                    
+                    # Add metadata
+                    result["enriched_by"] = f"LMStudio:{self.model}"
+                    result["enriched_at"] = now_iso
+                    
+                    LOGGER.info("LM enrich successful")
+                    return result, "ok"
+                else:
+                    LOGGER.warning("LM error %d: %s", resp.status_code, resp.text[:200])
+                    
+            except Exception as e:
+                LOGGER.warning("LM attempt %d failed: %s", attempt, str(e))
+                if attempt < tries:
+                    time.sleep(2 * attempt)  # Simple backoff
+        
+        LOGGER.error("LM enrich failed after %d attempts", tries)
+        return None, "failed"
+
     def enrich(self, author: str, title: str) -> Tuple[Optional[Dict[str, Any]], str]:
         """
         Returns (payload, status). status in {"ok", "failed"}
@@ -453,14 +569,18 @@ class LMClient:
                 LOGGER.info("LM enrich attempt %d/%d (openai-style) for '%s' by %s", attempt, tries, title, author)
                 prompt = self._build_prompt(author, title)
                 schema = self._json_schema()
+                LOGGER.info("LM JSON Schema sent to LMStudio: %s", json.dumps(schema, indent=2))
                 openai_payload = {
                     "model": self.model,
                     "messages": [
                         {"role": "system", "content": (
                             "You are an expert librarian and literary analyst. Your task is to enrich book metadata. "
-                            "Respond with ONLY valid JSON, no additional text, no markdown, no code blocks. "
-                            "If you don't know a field, use null or []. Strictly follow the schema and data types. "
-                            "Focus on accuracy and provide helpful categorization."
+                            "You MUST respond with ONLY valid JSON following the exact schema provided. "
+                            "No additional text, no markdown, no code blocks, no explanations. "
+                            "Required fields: audience (must be one of: children, young_adult, adult, general), "
+                            "confidence (0.0-1.0 number). "
+                            "If you don't know a field, use null for strings or [] for arrays. "
+                            "Focus on accuracy over completeness."
                         )},
                         {"role": "user", "content": prompt},
                     ],
@@ -477,6 +597,9 @@ class LMClient:
                 }
                 LOGGER.debug("LM request payload: model=%s, timeout=%s, prompt_length=%d", 
                            self.model, self.timeout, len(prompt))
+                LOGGER.info("LM prompt sent to LMStudio:\n--- SYSTEM MESSAGE ---\n%s\n--- USER MESSAGE ---\n%s\n--- END PROMPT ---", 
+                           openai_payload["messages"][0]["content"], 
+                           openai_payload["messages"][1]["content"])
                 with httpx.Client(timeout=self.timeout) as client:
                     with lm_rate_limit():
                         resp = client.post(
@@ -489,17 +612,34 @@ class LMClient:
                 if resp.status_code == 200:
                     data = resp.json()
                     content = (data.get("choices", [{}])[0].get("message", {}).get("content", ""))
+                    LOGGER.info("LM full response from LMStudio:\n--- RAW RESPONSE ---\n%s\n--- END RESPONSE ---", content)
+                    
                     parsed = json.loads(content) if isinstance(content, str) else content
+                    LOGGER.debug("LM parsed data: %s", str(parsed)[:200])
+                    
                     payload = self._validate_payload(parsed)
-                    # Quick sanity check: ensure at least one meaningful field present
+                    LOGGER.debug("LM validated payload: %s", str(payload)[:200])
+                    
+                    # Quick sanity check: ensure we have required fields and some meaningful content
+                    # audience and confidence are required by schema, others optional but at least one should be present
+                    has_required = payload.get("audience") and payload.get("confidence") is not None
                     meaningful_keys = [
-                        k for k in ("genre", "year", "series", "audience", "tags", "premise")
-                        if payload.get(k)
+                        k for k in ("genre", "year", "series", "tags", "premise")
+                        if payload.get(k) not in (None, "", [])
                     ]
-                    if not meaningful_keys:
+                    LOGGER.debug("LM required fields present: %s, meaningful keys: %s", has_required, meaningful_keys)
+                    
+                    if not has_required:
+                        LOGGER.warning("LM payload rejected - missing required fields (audience, confidence). Full payload: %s", payload)
+                        raise ValueError("Missing required enrichment fields")
+                    
+                    if not meaningful_keys and not payload.get("premise"):
+                        LOGGER.warning("LM payload rejected - no meaningful content. Full payload: %s", payload)
                         raise ValueError("Empty/meaningless enrichment payload")
+                    
                     payload.setdefault("enriched_by", f"LMStudio:{self.model}")
                     payload.setdefault("enriched_at", now_iso)
+                    LOGGER.info("LM enrich successful for '%s' by %s", title, author)
                     return payload, "ok"
                 else:
                     # If server rejects schema, try text mode (no response_format) and parse loosely
@@ -576,20 +716,35 @@ class LMClient:
         return None, "failed"
 
     def _build_prompt(self, author: str, title: str) -> str:
-        # Simplified English prompt for better results
+        # Enhanced prompt with JSON structure example
         return (
             f"Analyze this book and return metadata as JSON:\n\n"
             f"Author: \"{author}\"\n"
             f"Title: \"{title}\"\n\n"
+            "Return ONLY valid JSON in this exact structure:\n"
+            "{\n"
+            '  "genre": "Fantasy",  // or null if unknown\n'
+            '  "year": 2020,        // publication year as integer, or null\n'
+            '  "series": "Series Name",  // or null if not part of a series\n'
+            '  "series_number": 1,  // position in series as integer, or null\n'
+            '  "audience": "adult",  // REQUIRED: one of "children", "young_adult", "adult", "general"\n'
+            '  "tags": ["fantasy", "magic", "adventure"],  // array of strings, max 8\n'
+            '  "content_warnings": ["violence"],  // array of strings, max 3, or []\n'
+            '  "premise": "A brief spoiler-free summary...",  // or null\n'
+            '  "localized": {\n'
+            '    "es": {"premise": "Resumen en español..."},  // Spanish translation if possible\n'
+            '    "en": {"premise": "Summary in English..."}\n'
+            '  },\n'
+            '  "confidence": 0.8  // REQUIRED: number 0.0-1.0 based on your knowledge\n'
+            "}\n\n"
             "Instructions:\n"
-            "- Return ONLY valid JSON, no explanations\n"
-            "- Use null for unknown fields, [] for empty arrays\n"
+            "- audience and confidence are REQUIRED fields\n"
+            "- Use null for unknown string/integer fields\n"
+            "- Use [] for empty arrays\n"
             "- Keep tags short and relevant (max 8)\n"
             "- Write premise without spoilers (100-200 words)\n"
-            "- Include Spanish translation in localized.es.premise if possible\n"
-            "- Set confidence 0.0-1.0 based on your knowledge of this book\n\n"
-            "Focus on: genre, year, audience (children/young_adult/adult/general), "
-            "series info if applicable, descriptive tags, and brief premise."
+            "- Set confidence based on how well you know this book\n"
+            "- NO explanations, NO markdown, ONLY the JSON"
         )
 
     @staticmethod
@@ -609,43 +764,29 @@ class LMClient:
 
     @staticmethod
     def _json_schema() -> Dict[str, Any]:
-        """JSON Schema for enforced structured output."""
-        lang_block = {
-            "type": "object",
-            "properties": {
-                "premise": {"type": ["string", "null"]},
-                "tags": {"type": "array", "items": {"type": "string"}},
-            },
-            "additionalProperties": False,
-        }
-        schema: Dict[str, Any] = {
-            "$schema": "http://json-schema.org/draft-07/schema#",
-            "type": "object",
-            "properties": {
-                "genre": {"type": ["string", "null"]},
-                "year": {"type": ["integer", "null"]},
-                "series": {"type": ["string", "null"]},
-                "series_number": {"type": ["integer", "null"]},
-                "audience": {"type": ["string", "null"]},
-                "tags": {"type": "array", "items": {"type": "string"}},
-                "content_warnings": {"type": "array", "items": {"type": "string"}},
-                "premise": {"type": ["string", "null"]},
-                "confidence": {"type": ["number", "null"]},
-                "localized": {
-                    "type": ["object", "null"],
-                    "properties": {
-                        "es": lang_block,
-                        "en": lang_block,
-                        "fr": lang_block,
-                        "de": lang_block,
-                        "pt": lang_block,
-                    },
-                    "additionalProperties": False,
+        """Load JSON Schema from enrichment_model.json file."""
+        try:
+            schema_path = Path(__file__).parent / "enrichment_model.json"
+            with open(schema_path, 'r', encoding='utf-8') as f:
+                schema = json.load(f)
+            return schema
+        except Exception as e:
+            LOGGER.warning("Failed to load enrichment_model.json, using fallback schema: %s", e)
+            # Fallback minimal schema
+            return {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "object",
+                "properties": {
+                    "genre": {"type": ["string", "null"]},
+                    "year": {"type": ["integer", "null"]},
+                    "audience": {"type": "string", "enum": ["children", "young_adult", "adult", "general"]},
+                    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                    "premise": {"type": ["string", "null"]},
                 },
-            },
-            "additionalProperties": False,
-        }
-        return schema
+                "required": ["audience", "confidence"],
+                "additionalProperties": False,
+            }
 
     @staticmethod
     def _validate_payload(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1128,7 +1269,7 @@ def enrich_batch(req: EnrichBatchRequest, session: Session = Depends(get_session
             select(Book).where(Book.enrichment_status != "ok").limit(limit)
         ).all()
     for b in books:
-        payload, status = LM.enrich(b.author, b.title)
+        payload, status = LM.enrich_simple(b.author, b.title)
         apply_enrichment_to_book(session, b, payload, status)
         (updated if status == "ok" else failed).append(b.id)  # type: ignore[arg-type]
     return {"updated": updated, "failed": failed}
@@ -1175,7 +1316,7 @@ def enrich_all(req: EnrichAllRequest, background: BackgroundTasks, session: Sess
                         ENRICH_PROGRESS["processed"] += 1
                         continue
                     ENRICH_PROGRESS["last_book_id"] = bid
-                    payload, status = LM.enrich(b.author, b.title)
+                    payload, status = LM.enrich_simple(b.author, b.title)
                     apply_enrichment_to_book(s, b, payload, status)
                     if status == "ok":
                         ENRICH_PROGRESS["updated"] += 1
@@ -1199,11 +1340,17 @@ def enrich_status() -> Dict[str, Any]:
 
 @app.post("/enrich/{book_id}")
 def enrich_one(book_id: int, session: Session = Depends(get_session)):
+    LOGGER.info("Enrich request for book ID: %d", book_id)
     book = session.get(Book, book_id)
     if not book:
+        LOGGER.warning("Book not found: %d", book_id)
         raise HTTPException(status_code=404, detail="Book not found")
-    payload, status = LM.enrich(book.author, book.title)
+    
+    LOGGER.info("Enriching book: '%s' by %s", book.title, book.author)
+    payload, status = LM.enrich_simple(book.author, book.title)
     book = apply_enrichment_to_book(session, book, payload, status)
+    
+    LOGGER.info("Enrich completed for book ID %d: status=%s", book_id, status)
     return {"status": status, "enriched": payload}
 
 

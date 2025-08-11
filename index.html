@@ -233,6 +233,15 @@
         <span class="lbl" id="lbl-year-to">Hasta</span>
         <select id="year_to" aria-label="Año hasta"></select>
       </label>
+      <label class="pill">
+        <span class="lbl" id="lbl-state">Estado</span>
+        <select id="state" aria-label="Estado">
+          <option value="">—</option>
+          <option value="favorite">Favoritos</option>
+          <option value="read">Leídos</option>
+          <option value="pending">Pendientes</option>
+        </select>
+      </label>
       <button class="btn primary" id="btnSearch">Buscar</button>
       <button class="btn" id="btnReindex" title="Reindexar">Reindex</button>
   <button class="btn" id="btnEnrichAll" title="Enriquecer todos">Enriquecer todo</button>
@@ -327,6 +336,7 @@
       document.getElementById('btnReindex').textContent = t('reindex');
   document.getElementById('btnEnrichAll').textContent = t('enrichAll');
   document.getElementById('btnEnrichNew').textContent = t('enrichNew');
+  document.getElementById('lbl-state').textContent = 'Estado';
       document.getElementById('status').textContent = t('ready');
       document.getElementById('lbl-tip').textContent = t('tip');
       document.getElementById('lbl-tip2').textContent = t('tip2');
@@ -379,6 +389,7 @@
       const genre = document.querySelector('#genre').value.trim();
   const year_from = document.querySelector('#year_from').value;
   const year_to = document.querySelector('#year_to').value;
+    const stateFilter = document.querySelector('#state').value;
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (autor) params.set('autor', autor);
@@ -386,6 +397,7 @@
       if (genre) params.set('genre', genre);
       if (year_from) params.set('year_from', year_from);
       if (year_to) params.set('year_to', year_to);
+    if (stateFilter) params.set('state_filter', stateFilter);
       params.set('page', state.page);
       params.set('page_size', state.page_size);
       return params.toString();
@@ -435,9 +447,11 @@
           // Reset page info suffix for new book
           lastDetailBase = `${detail.title} — ${detail.author}`;
           updatePageInfo(true);
+          // Update state toggles
+          updateStateToggles(detail);
         } catch {}
-        // Restore last position for this book after loading content and applying prefs
-        restoreProgress();
+        // Restore last position from server
+        await restoreProgressServer();
       if (window.innerWidth < 1100) document.querySelector('.viewer').scrollIntoView({ behavior:'smooth', block:'start' });
     }
     async function enrich(id) {
@@ -546,14 +560,12 @@
 
   // -------- Reader controls --------
   const READER_PREFS_KEY = 'skald.reader';
-  const PROGRESS_KEY = 'skald.progress';
   let readerPrefs = { mode: 'scroll', fontSize: 1.0, family: 'serif', lineHeight: 1.6, padding: 1.25 };
   let lastDetailBase = '—';
   let currentBookId = null;
-  function loadProgressMap(){ try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; } }
-  function saveProgressMap(map){ try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(map)); } catch {} }
-  function getProgress(bookId){ const m = loadProgressMap(); return m && m[bookId] || null; }
-  function setProgress(bookId, part){ const m = loadProgressMap(); const prev = m[bookId] || {}; m[bookId] = { ...prev, ...part, ts: Date.now() }; saveProgressMap(m); }
+  // Server-side progress
+  async function getProgressServer(){ if (!currentBookId) return null; try { return await fetchJSON(api(`/books/${currentBookId}/progress`)); } catch { return null; } }
+  async function setProgressServer(payload){ if (!currentBookId) return; try { await fetchJSON(api(`/books/${currentBookId}/progress`), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) }); } catch {} }
   function loadReaderPrefs(){ try { const s = JSON.parse(localStorage.getItem(READER_PREFS_KEY) || '{}'); readerPrefs = { ...readerPrefs, ...s }; } catch{} }
   function saveReaderPrefs(){ localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs)); }
   function applyReaderPrefs(){
@@ -570,7 +582,8 @@
     document.getElementById('btnModeScroll').classList.toggle('active', readerPrefs.mode!=='paged');
     document.getElementById('btnModePaged').classList.toggle('active', readerPrefs.mode==='paged');
   // Try to restore approximate position after visual changes
-  restoreProgress();
+  // Try to restore approximate position after visual changes
+  restoreProgressServer();
   updatePageInfo(true);
   }
   function setReaderHTML(html){ const r = document.getElementById('reader'); if (!r) return; r.innerHTML = html; r.scrollTop = 0; updatePageInfo(); }
@@ -584,7 +597,7 @@
     const current = Math.min(total, Math.max(1, Math.floor(r.scrollTop / r.clientHeight) + 1));
     document.getElementById('detail').textContent = `${base} • Página ${current}/${total}`;
   }
-  function captureProgress(){
+  async function captureProgress(){
     if (!currentBookId) return;
     const r = document.getElementById('reader'); if (!r) return;
     const maxScroll = Math.max(1, r.scrollHeight - r.clientHeight);
@@ -592,23 +605,22 @@
     if (readerPrefs.mode === 'paged') {
       const total = Math.max(1, Math.ceil(r.scrollHeight / r.clientHeight));
       const current = Math.min(total, Math.max(1, Math.floor(r.scrollTop / r.clientHeight) + 1));
-      setProgress(currentBookId, { paged: { page: current, percent }, lastMode: 'paged' });
+      await setProgressServer({ mode: 'paged', page: current, percent });
     } else {
-      setProgress(currentBookId, { scroll: { scrollTop: r.scrollTop, percent }, lastMode: 'scroll' });
+      await setProgressServer({ mode: 'scroll', scroll_top: r.scrollTop, percent });
     }
   }
-  function restoreProgress(){
+  async function restoreProgressServer(){
     if (!currentBookId) return;
     const r = document.getElementById('reader'); if (!r) return;
-    const p = getProgress(currentBookId);
+    const p = await getProgressServer();
     if (!p) return;
-    if (readerPrefs.mode === 'paged' && p.paged) {
-      const page = Math.max(1, p.paged.page|0);
-      const target = (page - 1) * r.clientHeight;
-      r.scrollTop = target;
-    } else if (readerPrefs.mode !== 'paged' && p.scroll) {
+    if (readerPrefs.mode === 'paged' && p.page) {
+      const page = Math.max(1, p.page|0);
+      r.scrollTop = (page - 1) * r.clientHeight;
+    } else if (readerPrefs.mode !== 'paged' && (typeof p.scroll_top === 'number' || typeof p.percent === 'number')) {
       const maxScroll = Math.max(0, r.scrollHeight - r.clientHeight);
-      let target = typeof p.scroll.scrollTop === 'number' ? p.scroll.scrollTop : Math.round((p.scroll.percent || 0) * maxScroll);
+      let target = typeof p.scroll_top === 'number' ? p.scroll_top : Math.round((p.percent || 0) * maxScroll);
       target = Math.max(0, Math.min(maxScroll, target));
       r.scrollTop = target;
     }
@@ -639,6 +651,27 @@
   }, { passive: false });
   document.addEventListener('keydown', (e)=>{ if (readerPrefs.mode==='paged' && ['ArrowRight','PageDown'].includes(e.key)) { e.preventDefault(); pageNext(); } if (readerPrefs.mode==='paged' && ['ArrowLeft','PageUp'].includes(e.key)) { e.preventDefault(); pagePrev(); } });
   loadReaderPrefs(); applyReaderPrefs();
+
+  // ---------- State toggles (favorite/read/pending) ----------
+  async function updateStateToggles(detail){
+    const bar = document.querySelector('.controls-row');
+    let group = document.getElementById('stateGroup');
+    if (!group) {
+      group = document.createElement('div'); group.className = 'seg'; group.id = 'stateGroup'; group.setAttribute('role','group'); group.setAttribute('aria-label','Estado');
+      group.innerHTML = `
+        <button id="btnFav" title="Favorito">★</button>
+        <button id="btnRead" title="Leído">✔</button>
+        <button id="btnPending" title="Pendiente">⏳</button>
+      `;
+      bar.appendChild(group);
+      document.getElementById('btnFav').addEventListener('click', async ()=>{ if (!currentBookId) return; const cur = group.classList.contains('is-fav'); await fetchJSON(api(`/books/${currentBookId}/state`), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ favorite: !cur }) }); group.classList.toggle('is-fav', !cur); await search(); });
+      document.getElementById('btnRead').addEventListener('click', async ()=>{ if (!currentBookId) return; const cur = group.classList.contains('is-read'); await fetchJSON(api(`/books/${currentBookId}/state`), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ read: !cur }) }); group.classList.toggle('is-read', !cur); await search(); });
+      document.getElementById('btnPending').addEventListener('click', async ()=>{ if (!currentBookId) return; const cur = group.classList.contains('is-pending'); await fetchJSON(api(`/books/${currentBookId}/state`), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ pending: !cur }) }); group.classList.toggle('is-pending', !cur); await search(); });
+    }
+    group.classList.toggle('is-fav', !!detail.favorite);
+    group.classList.toggle('is-read', !!detail.read);
+    group.classList.toggle('is-pending', !!detail.pending);
+  }
   </script>
 </body>
 </html>

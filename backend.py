@@ -21,6 +21,8 @@ import time
 import random
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+import threading
+from contextlib import contextmanager
 
 import bleach
 import httpx
@@ -34,7 +36,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Column, String
 from sqlalchemy.dialects.sqlite import JSON as SQLITE_JSON
 from sqlmodel import Field as SQLField, Session, SQLModel, create_engine, select
-from sqlalchemy import Boolean, Integer
+from sqlalchemy import Integer
 import hashlib
 
 
@@ -55,8 +57,11 @@ class AppConfig(BaseModel):
     enrichment_batch_size: int = 10
     # Optional model name for OpenAI-style LMStudio endpoint
     lm_model: Optional[str] = "openai/gpt-oss-20"
+    # LM rate limiting
+    lm_max_concurrency: int = 5
+    lm_min_interval_ms: int = 250
 
-    @field_validator("page_size_default", "enrichment_batch_size")
+    @field_validator("page_size_default", "enrichment_batch_size", "lm_max_concurrency", "lm_min_interval_ms")
     def _positive(cls, v: int):  # type: ignore[override]
         if v <= 0:
             raise ValueError("must be positive")
@@ -119,11 +124,11 @@ class Book(SQLModel, table=True):
 
 class BookState(SQLModel, table=True):
     id: Optional[int] = SQLField(default=None, primary_key=True)
-    book_id: int = SQLField(index=True, sa_column=Column(Integer, unique=True))
+    book_id: int = SQLField(sa_column=Column(Integer, unique=True))
     # User flags
-    favorite_flag: bool = SQLField(default=False, sa_column=Column(Boolean, index=True))
-    read_flag: bool = SQLField(default=False, sa_column=Column(Boolean, index=True))
-    pending_flag: bool = SQLField(default=False, sa_column=Column(Boolean, index=True))
+    favorite_flag: bool = SQLField(default=False, index=True)
+    read_flag: bool = SQLField(default=False, index=True)
+    pending_flag: bool = SQLField(default=False, index=True)
     # Progress
     last_mode: Optional[str] = SQLField(default=None, index=True)  # 'scroll' | 'paged'
     scroll_top: Optional[int] = SQLField(default=None)
@@ -135,6 +140,38 @@ class BookState(SQLModel, table=True):
 DB_PATH: Path = Path(CONFIG.db_path)
 ENGINE = None  # type: ignore[assignment]
 ENRICH_PROGRESS: Dict[str, Any] = {"running": False}
+LM_SEMAPHORE: Optional[threading.Semaphore] = None
+LM_LAST_REQUEST: float = 0.0
+LM_LOCK = threading.Lock()
+
+
+@contextmanager
+def lm_rate_limit():
+    """Global LM request rate limiter: limits concurrent requests and enforces a minimum
+    interval between request starts.
+
+    Controlled by CONFIG.lm_max_concurrency and CONFIG.lm_min_interval_ms.
+    """
+    global LM_LAST_REQUEST
+    sem = LM_SEMAPHORE
+    if sem is None:
+        # Not initialized yet; no limiting
+        yield
+        return
+    sem.acquire()
+    try:
+        # Enforce min interval between starts
+        with LM_LOCK:
+            now = time.monotonic()
+            min_interval = (CONFIG.lm_min_interval_ms or 0) / 1000.0
+            if min_interval > 0:
+                delta = now - LM_LAST_REQUEST
+                if delta < min_interval:
+                    time.sleep(min_interval - delta)
+            LM_LAST_REQUEST = time.monotonic()
+        yield
+    finally:
+        sem.release()
 
 
 def init_app(config_path: Optional[str] = None) -> None:
@@ -142,12 +179,15 @@ def init_app(config_path: Optional[str] = None) -> None:
 
     Safe to call multiple times in-process (used in tests).
     """
-    global CONFIG, DB_PATH, ENGINE, LM
+    global CONFIG, DB_PATH, ENGINE, LM, LM_SEMAPHORE, LM_LAST_REQUEST
     CONFIG = load_config(config_path)
     DB_PATH = Path(CONFIG.db_path)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     ENGINE = create_engine(f"sqlite:///{DB_PATH.as_posix()}", echo=False)
     SQLModel.metadata.create_all(ENGINE)
+    # Init LM rate limiter
+    LM_SEMAPHORE = threading.Semaphore(max(1, int(CONFIG.lm_max_concurrency)))
+    LM_LAST_REQUEST = 0.0
     # Recreate LM client with possibly new config
     LM = LMClient(
         CONFIG.lm_url,
@@ -434,11 +474,12 @@ class LMClient:
                     },
                 }
                 with httpx.Client(timeout=self.timeout) as client:
-                    resp = client.post(
-                        openai_url,
-                        json=openai_payload,
-                        headers={"Content-Type": "application/json", "Accept": "application/json"},
-                    )
+                    with lm_rate_limit():
+                        resp = client.post(
+                            openai_url,
+                            json=openai_payload,
+                            headers={"Content-Type": "application/json", "Accept": "application/json"},
+                        )
                 if resp.status_code == 200:
                     data = resp.json()
                     content = (data.get("choices", [{}])[0].get("message", {}).get("content", ""))
@@ -460,11 +501,12 @@ class LMClient:
                         openai_payload_text = dict(openai_payload)
                         openai_payload_text.pop("response_format", None)
                         with httpx.Client(timeout=self.timeout) as client:
-                            resp_text = client.post(
-                                openai_url,
-                                json=openai_payload_text,
-                                headers={"Content-Type": "application/json", "Accept": "application/json"},
-                            )
+                            with lm_rate_limit():
+                                resp_text = client.post(
+                                    openai_url,
+                                    json=openai_payload_text,
+                                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                                )
                         if resp_text.status_code == 200:
                             data_t = resp_text.json()
                             content_t = (data_t.get("choices", [{}])[0].get("message", {}).get("content", ""))
@@ -485,11 +527,12 @@ class LMClient:
                 # Try legacy endpoint as fallback
                 try:
                     with httpx.Client(timeout=self.timeout) as client:
-                        resp2 = client.post(
-                            legacy_url,
-                            json={"autor": author, "titulo": title},
-                            headers={"Content-Type": "application/json", "Accept": "application/json"},
-                        )
+                        with lm_rate_limit():
+                            resp2 = client.post(
+                                legacy_url,
+                                json={"autor": author, "titulo": title},
+                                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                            )
                     if resp2.status_code != 200:
                         raise RuntimeError(f"Legacy HTTP {resp2.status_code}")
                     # Some legacy endpoints return plain text; parse loosely

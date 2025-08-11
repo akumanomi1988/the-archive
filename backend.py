@@ -57,9 +57,9 @@ class AppConfig(BaseModel):
     enrichment_batch_size: int = 10
     # Optional model name for OpenAI-style LMStudio endpoint
     lm_model: Optional[str] = "openai/gpt-oss-20"
-    # LM rate limiting
-    lm_max_concurrency: int = 5
-    lm_min_interval_ms: int = 250
+    # LM rate limiting - Máximo 3 libros siendo enriquecidos simultáneamente para evitar timeouts
+    lm_max_concurrency: int = 3
+    lm_min_interval_ms: int = 500  # Intervalo más largo entre peticiones
 
     @field_validator("page_size_default", "enrichment_batch_size", "lm_max_concurrency", "lm_min_interval_ms")
     def _positive(cls, v: int):  # type: ignore[override]
@@ -828,11 +828,12 @@ def list_books(
     genre: Optional[str] = Query(default=None),
     year_from: Optional[int] = Query(default=None, ge=0),
     year_to: Optional[int] = Query(default=None, ge=0),
+    state_filter: Optional[str] = Query(default=None, description="Filter by state: favorite|read|pending"),
+    sort_by: Optional[str] = Query(default="title", description="Sort by: title|author|year|added|progress|genre"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=CONFIG.page_size_default, ge=1, le=200),
     session: Session = Depends(get_session),
 ) -> PaginatedBooks:
-    state_filter: Optional[str] = Query(default=None, description="Filter by state: favorite|read|pending")
     stmt = select(Book)
     if q:
         like = f"%{q}%"
@@ -849,9 +850,6 @@ def list_books(
         stmt = stmt.where((Book.year.is_not(None)) & (Book.year <= year_to))
 
     # State filtering if provided
-    # We fetch after building the text filters to reduce set size
-    # To keep SQL simple across SQLite versions, use IN (subquery)
-    # Validate state_filter
     if state_filter in {"favorite", "read", "pending"}:
         flag = {
             "favorite": BookState.favorite_flag,
@@ -861,14 +859,32 @@ def list_books(
         sub = select(BookState.book_id).where(flag == True)  # noqa: E712
         stmt = stmt.where(Book.id.in_(sub))
 
+    # Apply sorting
+    if sort_by == "author":
+        stmt = stmt.order_by(Book.author)
+    elif sort_by == "year":
+        stmt = stmt.order_by(Book.year.desc().nulls_last())
+    elif sort_by == "added":
+        stmt = stmt.order_by(Book.created_at.desc())
+    elif sort_by == "genre":
+        stmt = stmt.order_by(Book.genre.nulls_last())
+    else:  # Default to title
+        stmt = stmt.order_by(Book.title)
+
     total = len(session.exec(stmt).all())
     # pagination
     offset = (page - 1) * page_size
     stmt = stmt.offset(offset).limit(page_size)
     rows = session.exec(stmt).all()
     ids = [b.id for b in rows if b is not None]
+    
     # Map states for these ids
     state_map: Dict[int, BookState] = {}
+    if ids:
+        st_rows = session.exec(select(BookState).where(BookState.book_id.in_(ids))).all()
+        for st in st_rows:
+            if st and st.book_id:
+                state_map[st.book_id] = st
     if ids:
         st_rows = session.exec(select(BookState).where(BookState.book_id.in_(ids))).all()
         for st in st_rows:
@@ -879,6 +895,32 @@ def list_books(
         if not b:
             continue
         st = state_map.get(b.id or -1)
+        
+        # Calculate progress percentage
+        progress_percent = 0
+        if st:
+            if st.percent is not None:
+                progress_percent = st.percent
+            elif st.last_mode == 'paged' and st.page is not None:
+                # For paged mode, we need to estimate based on current page
+                # This is a rough estimate since we don't store total pages
+                progress_percent = min(100, st.page * 5)  # Rough estimate
+            elif st.scroll_top is not None:
+                # For scroll mode, we need the scroll ratio
+                # This is also an estimate since we don't store scroll height
+                progress_percent = min(100, st.scroll_top / 1000 * 100) if st.scroll_top > 0 else 0
+        
+        # Get enriched data for tags and word count
+        tags = []
+        word_count = None
+        if b.enriched:
+            try:
+                enriched_data = json.loads(b.enriched) if isinstance(b.enriched, str) else b.enriched
+                tags = enriched_data.get('tags', [])
+                word_count = enriched_data.get('word_count')
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
         items.append(
             {
                 "id": b.id,
@@ -894,6 +936,10 @@ def list_books(
                 "favorite": bool(st.favorite_flag) if st else False,
                 "read": bool(st.read_flag) if st else False,
                 "pending": bool(st.pending_flag) if st else False,
+                "progress_percent": round(progress_percent, 1),
+                "tags": tags,
+                "word_count": word_count,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
             }
         )
     return PaginatedBooks(total=total, page=page, page_size=page_size, items=items)

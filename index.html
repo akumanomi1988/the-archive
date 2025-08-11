@@ -138,20 +138,324 @@
     /* Optional margins for readability */
     .reader p { margin: 0 0 0.75em; }
 
-    /* Book list */
+    /* Book list - Diseño mejorado */
     .book {
-      padding: 1rem 1rem; border-bottom: 1px solid var(--line);
-      display:grid; gap:.35rem; transition: transform .18s ease, background-color .18s ease, box-shadow .18s ease;
+      background: var(--panel-solid);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      position: relative;
     }
-    .book:last-child { border-bottom: none; }
-    .book:hover { background: color-mix(in oklab, var(--panel-solid) 92%, var(--accent) 8%); transform: translateY(-1px); }
-    .book h4 { margin:0; font-size: 1.02rem; line-height: 1.35rem; letter-spacing:.1px; }
-    .meta { font-size:.9rem; color: var(--muted); }
-    .chips { display:flex; gap:.4rem; flex-wrap: wrap; }
-    .chip { background: var(--chip); color: var(--chip-fg); border:1px solid var(--line); padding:.15rem .6rem; border-radius: 999px; font-size:.75rem; }
+    .book:hover { 
+      background: color-mix(in oklab, var(--panel-solid) 95%, var(--accent) 5%); 
+      transform: translateY(-2px); 
+      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+      border-color: var(--accent);
+    }
+    
+    .book-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    
+    .book-info {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .book h4 { 
+      margin: 0 0 0.25rem 0; 
+      font-size: 1.1rem; 
+      line-height: 1.4; 
+      font-weight: 600;
+      color: var(--fg);
+    }
+    
+    .book-author {
+      font-size: 0.95rem;
+      color: var(--muted);
+      font-weight: 500;
+      margin-bottom: 0.5rem;
+    }
+    
+    .book-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+    
+    .book-meta .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    
+    .book-meta .meta-separator {
+      color: var(--line);
+    }
+    
+    .book-state-icons {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+    }
+    
+    .state-icon { 
+      font-size: 1rem;
+      padding: 0.2rem;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.05);
+    }
+    .state-icon[title="Favorito"] { color: #ff9500; background: rgba(255,149,0,0.15); }
+    .state-icon[title="Leído"] { color: #34c759; background: rgba(52,199,89,0.15); }
+    .state-icon[title="Pendiente"] { color: #007aff; background: rgba(0,122,255,0.15); }
+    .state-icon[title="Con marcadores"] { color: #8e44ad; background: rgba(142,68,173,0.15); }
+    .state-icon[title="Con notas"] { color: #e67e22; background: rgba(230,126,34,0.15); }
+    
+    .chips { 
+      display: flex; 
+      gap: 0.4rem; 
+      flex-wrap: wrap; 
+      margin-bottom: 0.75rem;
+    }
+    .chip { 
+      background: var(--chip); 
+      color: var(--chip-fg); 
+      border: 1px solid var(--line); 
+      padding: 0.25rem 0.6rem; 
+      border-radius: 6px; 
+      font-size: 0.75rem;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    .chip:hover {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border-color: var(--accent);
+    }
+
+    /* Progress bar mejorada */
+    .progress-bar { 
+      width: 100%; 
+      height: 6px; 
+      background: var(--line); 
+      border-radius: 3px; 
+      margin: 0.5rem 0;
+      overflow: hidden;
+    }
+    .progress-fill { 
+      height: 100%; 
+      background: linear-gradient(90deg, var(--accent), color-mix(in oklab, var(--accent) 80%, #fff 20%)); 
+      border-radius: 3px; 
+      transition: width 0.3s ease;
+      position: relative;
+    }
+    .progress-fill::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      animation: shimmer 2s infinite;
+    }
+    
+    @keyframes shimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    
+    /* History breadcrumbs */
+    .history { display: flex; gap: .5rem; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--line); }
+    .history-item { background: var(--chip); color: var(--chip-fg); padding: .2rem .5rem; border-radius: 999px; font-size: .75rem; cursor: pointer; }
+    .history-item:hover { background: var(--accent); color: var(--accent-fg); }
+    
+    /* Grid view */
+    /* Grid view mejorada */
+    .grid-view #list { 
+      display: grid; 
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); 
+      gap: 1.5rem; 
+      padding: 1rem;
+    }
+    .grid-view .book { 
+      display: flex; 
+      flex-direction: column; 
+      width: auto;
+      margin: 0;
+      text-align: left;
+      min-height: 200px;
+    }
+    .grid-view .book .cover { 
+      width: 100%; 
+      height: 120px; 
+      background: linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 70%, #fff 30%)); 
+      margin: 0 0 1rem 0; 
+      border-radius: 8px; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      color: var(--accent-fg); 
+      font-weight: 600; 
+      font-size: 0.9rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      text-align: center;
+      line-height: 1.3;
+      padding: 1rem;
+    }
+    
+    /* Efectos adicionales para las fichas */
+    .book-checkbox {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      width: 20px;
+      height: 20px;
+      accent-color: var(--accent);
+      z-index: 2;
+    }
+    
+    /* Estados de enriquecimiento */
+    .book[data-enrichment-status="ok"] {
+      border-left: 4px solid #34c759;
+    }
+    .book[data-enrichment-status="failed"] {
+      border-left: 4px solid #ff3b30;
+    }
+    .book[data-enrichment-status="none"] {
+      border-left: 4px solid var(--muted);
+    }
+    
+    /* Indicador de clic */
+    .book:active {
+      transform: translateY(0px) scale(0.98);
+    }
+    
+    /* Mejoras para dispositivos móviles */
+    @media (max-width: 768px) {
+      .book {
+        margin-bottom: 0.75rem;
+        padding: 1rem;
+      }
+      .actions {
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .action {
+        justify-content: center;
+        min-width: 100%;
+      }
+      .grid-view #list {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 1rem;
+        padding: 0.5rem;
+      }
+    }
+    
+    /* Animación de carga para enriquecimiento */
+    .book.enriching {
+      position: relative;
+      opacity: 0.7;
+    }
+    .book.enriching::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+      animation: loading 1.5s infinite;
+    }
+    
+    @keyframes loading {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    .batch-mode .book-checkbox { position: absolute; top: .5rem; left: .5rem; z-index: 2; }
+    .batch-toolbar { display: none; padding: .5rem; background: var(--elev); border-bottom: 1px solid var(--line); gap: .5rem; align-items: center; }
+    .batch-mode .batch-toolbar { display: flex; }
+    
+    /* Group headers */
+    .group-header { background: var(--chip); color: var(--chip-fg); padding: .5rem 1rem; margin: .5rem 0; border-radius: 8px; font-weight: bold; }
+    
+    /* Night mode auto detection */
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme]) { --bg: #0d0f14; --panel: #0f172acc; --panel-solid: #0f172a; --elev: #121826; --fg: #e6edf5; --muted: #9aa8bb; --line: #1f2a40; --accent: #0a84ff; --accent-fg: #08111f; --chip: #111a2f; --chip-fg: #b8c6d9; --kbd-bg:#0b1220; --kbd-fg:#cbd5e1; --kbd-br:#1f2a40; }
+    }
 
     .actions { display:flex; gap:.4rem; margin-top:.35rem; flex-wrap: wrap; }
-    .action { padding:.45rem .8rem; border-radius: 999px; border:1px solid var(--line); background: var(--elev); color: var(--fg); cursor: pointer; }
+    /* Actions mejoradas */
+    .actions { 
+      display: flex; 
+      gap: 0.5rem; 
+      flex-wrap: wrap;
+      align-items: center;
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--line);
+    }
+    .action { 
+      padding: 0.5rem 1rem; 
+      border-radius: 8px; 
+      border: 1px solid var(--line); 
+      background: var(--bg); 
+      color: var(--fg); 
+      cursor: pointer; 
+      font-size: 0.85rem;
+      font-weight: 500;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.15s ease;
+      min-height: 36px;
+      box-sizing: border-box;
+    }
+    .action:hover { 
+      background: var(--accent); 
+      color: var(--accent-fg); 
+      border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .action.ghost { 
+      background: transparent; 
+      border-color: transparent;
+      color: var(--muted);
+    }
+    .action.ghost:hover { 
+      background: var(--elev); 
+      color: var(--fg);
+      border-color: var(--line);
+    }
+    
+    .action.primary {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border-color: var(--accent);
+    }
+    .action.primary:hover {
+      background: color-mix(in oklab, var(--accent) 90%, #000 10%);
+      transform: translateY(-1px);
+      box-shadow: 0 3px 12px rgba(0,0,0,0.2);
+    }
+    
+    .action-icon {
+      font-size: 0.9rem;
+    }
     .action.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
     .footerbar { padding:.6rem .8rem; border-top:1px solid var(--line); display:flex; align-items:center; gap:.6rem; background: color-mix(in oklab, var(--panel-solid) 92%, transparent); }
     .spacer { flex: 1 1 auto; }
@@ -242,10 +546,39 @@
           <option value="pending">Pendientes</option>
         </select>
       </label>
+      <label class="pill">
+        <span class="lbl">Vista</span>
+        <select id="viewMode" aria-label="Modo de vista">
+          <option value="list">Lista</option>
+          <option value="grid">Cuadrícula</option>
+        </select>
+      </label>
+      <label class="pill">
+        <span class="lbl">Ordenar</span>
+        <select id="sortBy" aria-label="Ordenar por">
+          <option value="title">Título</option>
+          <option value="author">Autor</option>
+          <option value="year">Año</option>
+          <option value="added">Fecha añadido</option>
+          <option value="progress">Progreso</option>
+          <option value="genre">Género</option>
+        </select>
+      </label>
+      <label class="pill">
+        <span class="lbl">Agrupar</span>
+        <select id="groupBy" aria-label="Agrupar por">
+          <option value="">Sin agrupar</option>
+          <option value="author">Por autor</option>
+          <option value="genre">Por género</option>
+          <option value="year">Por año</option>
+        </select>
+      </label>
       <button class="btn primary" id="btnSearch">Buscar</button>
       <button class="btn" id="btnReindex" title="Reindexar">Reindex</button>
-  <button class="btn" id="btnEnrichAll" title="Enriquecer todos">Enriquecer todo</button>
-  <button class="btn" id="btnEnrichNew" title="Enriquecer nuevos">Enriquecer nuevos</button>
+      <button class="btn" id="btnEnrichAll" title="Enriquecer todos">Enriquecer todo</button>
+      <button class="btn" id="btnEnrichNew" title="Enriquecer nuevos">Enriquecer nuevos</button>
+      <button class="btn ghost" id="btnBatchMode" title="Selección múltiple">☑️ Batch</button>
+      <button class="btn ghost" id="btnExport" title="Exportar biblioteca">📤 Export</button>
       <span class="status" id="status">Listo.</span>
     </div>
   </header>
@@ -253,6 +586,13 @@
   <main>
     <div class="wrap grid">
       <section class="panel">
+        <div class="batch-toolbar">
+          <span id="batchCount">0 seleccionados</span>
+          <button class="btn" id="btnBatchRead">Marcar leídos</button>
+          <button class="btn" id="btnBatchFavorite">Marcar favoritos</button>
+          <button class="btn" id="btnBatchDelete">Desmarcar</button>
+          <button class="btn ghost" id="btnBatchCancel">Cancelar</button>
+        </div>
         <div class="results" id="results">
           <div id="list"></div>
         </div>
@@ -293,7 +633,9 @@
               <button id="btnPagePrev" title="Página anterior">◀</button>
               <button id="btnPageNext" title="Página siguiente">▶</button>
             </div>
-            <button class="btn" id="btnFullscreen" title="Pantalla completa">⛶</button>
+            <button id="btnFullscreen" title="Pantalla completa">⛶</button>
+            <button id="btnBookmark" title="Añadir marcador">🔖</button>
+            <button id="btnNotes" title="Notas">📝</button>
           </div>
         </div>
         <div class="viewer-body">
@@ -372,6 +714,13 @@
 
     // State
     let state = { page: 1, page_size: 20, total: 0, items: [], lastQuery: {} };
+    let recentBooks = []; // Reading history
+    let recentSearches = []; // Search history
+    let batchMode = false;
+    let selectedBooks = new Set();
+    let bookmarks = {}; // bookId -> [positions]
+    let notes = {}; // bookId -> {position: note}
+    let customLists = {}; // listName -> [bookIds]
 
     // Fetch helper
     async function fetchJSON(url, opts={}) {
@@ -379,6 +728,85 @@
       if (!res.ok) throw new Error(await res.text());
       const ct = res.headers.get('content-type') || '';
       return ct.includes('application/json') ? res.json() : res.text();
+    }
+
+    // History management
+    function addToHistory(book) {
+      recentBooks = recentBooks.filter(b => b.id !== book.id);
+      recentBooks.unshift(book);
+      if (recentBooks.length > 10) recentBooks.pop();
+      localStorage.setItem('skald.history', JSON.stringify(recentBooks));
+    }
+    function loadHistory() {
+      try { recentBooks = JSON.parse(localStorage.getItem('skald.history') || '[]'); } catch {}
+    }
+    function saveSearch(query) {
+      if (!query.trim()) return;
+      recentSearches = recentSearches.filter(q => q !== query);
+      recentSearches.unshift(query);
+      if (recentSearches.length > 5) recentSearches.pop();
+      localStorage.setItem('skald.searches', JSON.stringify(recentSearches));
+    }
+    function loadSearchHistory() {
+      try { recentSearches = JSON.parse(localStorage.getItem('skald.searches') || '[]'); } catch {}
+    }
+    
+    // Bookmarks and notes
+    function loadBookmarks() {
+      try { bookmarks = JSON.parse(localStorage.getItem('skald.bookmarks') || '{}'); } catch {}
+    }
+    function saveBookmarks() {
+      localStorage.setItem('skald.bookmarks', JSON.stringify(bookmarks));
+    }
+    function loadNotes() {
+      try { notes = JSON.parse(localStorage.getItem('skald.notes') || '{}'); } catch {}
+    }
+    function saveNotes() {
+      localStorage.setItem('skald.notes', JSON.stringify(notes));
+    }
+    function addBookmark() {
+      if (!currentBookId) return;
+      const r = document.getElementById('reader');
+      const position = r ? r.scrollTop : 0;
+      if (!bookmarks[currentBookId]) bookmarks[currentBookId] = [];
+      bookmarks[currentBookId].push({ position, timestamp: Date.now(), page: readerPrefs.mode === 'paged' ? Math.floor(position / r.clientHeight) + 1 : null });
+      saveBookmarks();
+      alert('Marcador añadido');
+    }
+    function showNotes() {
+      if (!currentBookId) return;
+      const note = prompt('Añadir nota:', notes[currentBookId]?.note || '');
+      if (note !== null) {
+        const r = document.getElementById('reader');
+        const position = r ? r.scrollTop : 0;
+        notes[currentBookId] = { note, position, timestamp: Date.now() };
+        saveNotes();
+      }
+    }
+    
+    // Auto night mode
+    function checkAutoNightMode() {
+      const hour = new Date().getHours();
+      const isNight = hour < 7 || hour > 20;
+      const currentTheme = localStorage.getItem('skald.theme') || 'auto';
+      if (currentTheme === 'auto') {
+        document.documentElement.setAttribute('data-theme', isNight ? 'dark' : 'light');
+      }
+    }
+    
+    // Reading time estimation (words per minute)
+    function estimateReadingTime(bookId) {
+      // Simple estimation: average book ~70k words, average reading speed 200 WPM
+      const book = state.items.find(b => b.id === bookId);
+      if (!book) return null;
+      const estimatedWords = (book.size_bytes || 100000) / 5; // rough chars to words
+      const wordsPerMinute = 200;
+      const totalMinutes = estimatedWords / wordsPerMinute;
+      const progress = book.progress_percent || 0;
+      const remainingMinutes = totalMinutes * (1 - progress / 100);
+      const hours = Math.floor(remainingMinutes / 60);
+      const minutes = Math.floor(remainingMinutes % 60);
+      return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
     }
 
     // Query builder
@@ -390,6 +818,9 @@
   const year_from = document.querySelector('#year_from').value;
   const year_to = document.querySelector('#year_to').value;
     const stateFilter = document.querySelector('#state').value;
+    const viewMode = document.querySelector('#viewMode').value;
+    const sortBy = document.querySelector('#sortBy').value;
+    const groupBy = document.querySelector('#groupBy').value;
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (autor) params.set('autor', autor);
@@ -397,35 +828,372 @@
       if (genre) params.set('genre', genre);
       if (year_from) params.set('year_from', year_from);
       if (year_to) params.set('year_to', year_to);
-    if (stateFilter) params.set('state_filter', stateFilter);
+      if (stateFilter) params.set('state_filter', stateFilter);
+      if (sortBy) params.set('sort_by', sortBy);
       params.set('page', state.page);
       params.set('page_size', state.page_size);
       return params.toString();
-    }
-
-    // Rendering
+    }    // Rendering
     function escapeHtml(s){ return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+    
+    function sortBooks(books, sortBy) {
+      return [...books].sort((a, b) => {
+        switch (sortBy) {
+          case 'author': return a.author.localeCompare(b.author);
+          case 'year': return (b.year || 0) - (a.year || 0);
+          case 'added': return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+          case 'progress': return (b.progress_percent || 0) - (a.progress_percent || 0);
+          case 'genre': return (a.genre || '').localeCompare(b.genre || '');
+          default: return a.title.localeCompare(b.title);
+        }
+      });
+    }
+    
+    function groupBooks(books, groupBy) {
+      if (!groupBy) return { '': books };
+      const groups = {};
+      books.forEach(book => {
+        let key = '';
+        switch (groupBy) {
+          case 'author': key = book.author || 'Sin autor'; break;
+          case 'genre': key = book.genre || 'Sin género'; break;
+          case 'year': key = book.year ? String(book.year) : 'Sin año'; break;
+        }
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(book);
+      });
+      return groups;
+    }
+    
     function renderList(data) {
       state.total = data.total ?? 0; state.items = data.items || []; state.page = data.page ?? 1; state.page_size = data.page_size ?? 20;
       const list = document.querySelector('#list');
+      const viewMode = document.querySelector('#viewMode').value;
+      const sortBy = document.querySelector('#sortBy').value;
+      const groupBy = document.querySelector('#groupBy').value;
+      
+      // Apply view mode class
+      const resultsEl = document.querySelector('#results');
+      resultsEl.classList.toggle('grid-view', viewMode === 'grid');
+      
+      // Sort and group
+      const sortedBooks = sortBooks(state.items, sortBy);
+      const groupedBooks = groupBooks(sortedBooks, groupBy);
+      
       list.innerHTML = '';
-      state.items.forEach(b => {
-        const div = document.createElement('div'); div.className = 'book';
-        const sizeKB = b.size_bytes ? Math.max(1, Math.round(b.size_bytes/1024)) : '';
-        const metaLine = [b.language, b.genre, (b.year || '')].filter(Boolean).join(' • ');
-        div.innerHTML = `
-          <h4>${escapeHtml(b.title)} <span class="meta">— ${escapeHtml(b.author)}</span></h4>
-          <div class="meta">${metaLine} ${sizeKB ? ' • ' + sizeKB + ' KB' : ''}</div>
-          <div class="chips">${b.tags?.slice?.(0,4)?.map(tag => `<span class="chip">${escapeHtml(tag)}</span>`).join('') || ''}</div>
-          <div class="actions">
-            <button class="action primary" data-open="${b.id}">${t('open')}</button>
-            <a class="action" href="${api(`/download/${b.id}`)}" target="_blank" rel="noopener">${t('download')}</a>
-            <button class="action" data-enrich="${b.id}">${t('enrich')}</button>
-          </div>`;
-        list.appendChild(div);
+      
+      Object.keys(groupedBooks).forEach(groupKey => {
+        if (groupKey && groupBy) {
+          const header = document.createElement('div');
+          header.className = 'group-header';
+          header.textContent = groupKey;
+          list.appendChild(header);
+        }
+        
+        groupedBooks[groupKey].forEach(b => {
+          const div = document.createElement('div'); 
+          div.className = 'book';
+          div.style.cursor = 'pointer';
+          div.dataset.bookId = b.id;
+          div.dataset.enrichmentStatus = b.enrichment_status || 'none';
+          
+          const sizeKB = b.size_bytes ? Math.max(1, Math.round(b.size_bytes/1024)) : '';
+          const metaLine = [b.language, b.genre, (b.year || '')].filter(Boolean).join(' • ');
+          const progressPercent = b.progress_percent || 0;
+          const progressBar = progressPercent > 0 ? `<div class="progress-bar"><div class="progress-fill" style="width: ${progressPercent}%"></div></div>` : '';
+          const readingTime = estimateReadingTime(b.id);
+          const timeInfo = readingTime ? ` • ~${readingTime} restante` : '';
+          
+          const stateIcons = [];
+          if (b.favorite) stateIcons.push('<span class="state-icon" title="Favorito">★</span>');
+          if (b.read) stateIcons.push('<span class="state-icon" title="Leído">✓</span>');
+          if (b.pending) stateIcons.push('<span class="state-icon" title="Pendiente">⏳</span>');
+          if (bookmarks[b.id]?.length) stateIcons.push('<span class="state-icon" title="Con marcadores">🔖</span>');
+          if (notes[b.id]?.note) stateIcons.push('<span class="state-icon" title="Con notas">📝</span>');
+          
+          const enrichedTags = b.tags ? b.tags.slice(0,4).map(tag => `<span class="chip">${escapeHtml(tag)}</span>`).join('') : '';
+          
+          let checkbox = '';
+          if (batchMode) {
+            checkbox = `<input type="checkbox" class="book-checkbox" ${selectedBooks.has(b.id) ? 'checked' : ''} onchange="toggleBookSelection(${b.id})">`;
+          }
+          
+          if (viewMode === 'grid') {
+            div.innerHTML = `
+              ${checkbox}
+              <div class="cover">${b.title.substring(0, 20)}${b.title.length > 20 ? '...' : ''}</div>
+              <h4>${escapeHtml(b.title)} ${stateIcons.join('')}</h4>
+              <div class="meta">${escapeHtml(b.author)}</div>
+              ${progressBar}`;
+          } else {
+            // Calcular tamaño del archivo
+            const sizeText = sizeKB ? `${sizeKB} KB` : '';
+            const metaItems = [
+              b.language ? `<span class="meta-item">🌐 ${b.language}</span>` : '',
+              b.genre ? `<span class="meta-item">📚 ${b.genre}</span>` : '',
+              b.year ? `<span class="meta-item">📅 ${b.year}</span>` : '',
+              sizeText ? `<span class="meta-item">💾 ${sizeText}</span>` : '',
+              readingTime ? `<span class="meta-item">⏱️ ${readingTime} restante</span>` : ''
+            ].filter(Boolean);
+            
+            const enrichmentIcon = b.enrichment_status === 'ok' ? '✨' : 
+                                  b.enrichment_status === 'failed' ? '❌' : '⭕';
+            
+            div.innerHTML = `
+              ${checkbox}
+              <div class="book-header">
+                <div class="book-info">
+                  <h4>${escapeHtml(b.title)}</h4>
+                  <div class="book-author">👤 ${escapeHtml(b.author)}</div>
+                  ${metaItems.length ? `<div class="book-meta">${metaItems.join('<span class="meta-separator">•</span>')}</div>` : ''}
+                </div>
+                <div class="book-state-icons">
+                  ${stateIcons.join('')}
+                </div>
+              </div>
+              ${progressBar}
+              ${enrichedTags ? `<div class="chips">${enrichedTags}</div>` : ''}
+              <div class="actions">
+                <a class="action primary" href="${api(`/download/${b.id}`)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+                  <span class="action-icon">⬇️</span> ${t('download')}
+                </a>
+                <button class="action" data-enrich="${b.id}" onclick="event.stopPropagation()">
+                  <span class="action-icon">${enrichmentIcon}</span> ${t('enrich')}
+                </button>
+                <button class="action ghost" data-info="${b.id}" onclick="event.stopPropagation()">
+                  <span class="action-icon">ℹ️</span> Info
+                </button>
+              </div>`;
+          }
+          
+          // Click anywhere on card to open book (unless in batch mode)
+          if (!batchMode) {
+            div.addEventListener('click', () => openBook(b.id));
+          }
+          list.appendChild(div);
+        });
       });
+      
       document.querySelector('#pageinfo').textContent =
         t('pageInfo', { page: state.page, pages: Math.max(1, Math.ceil(state.total/state.page_size)), total: state.total });
+    }
+
+    // Batch Operations
+    function toggleBatchMode() {
+      batchMode = !batchMode;
+      selectedBooks.clear();
+      const batchBtn = document.querySelector('#batchBtn');
+      batchBtn.textContent = batchMode ? 'Salir' : 'Lote';
+      batchBtn.classList.toggle('active', batchMode);
+      document.body.classList.toggle('batch-mode', batchMode);
+      performSearch(); // Re-render to show/hide checkboxes
+    }
+    
+    function toggleBookSelection(bookId) {
+      if (selectedBooks.has(bookId)) {
+        selectedBooks.delete(bookId);
+      } else {
+        selectedBooks.add(bookId);
+      }
+      updateBatchToolbar();
+    }
+    
+    function selectAllBooks() {
+      state.items.forEach(book => selectedBooks.add(book.id));
+      updateBatchToolbar();
+      document.querySelectorAll('.book-checkbox').forEach(cb => cb.checked = true);
+    }
+    
+    function clearSelection() {
+      selectedBooks.clear();
+      updateBatchToolbar();
+      document.querySelectorAll('.book-checkbox').forEach(cb => cb.checked = false);
+    }
+    
+    function updateBatchToolbar() {
+      const count = selectedBooks.size;
+      const countEl = document.querySelector('#selectedCount');
+      const batchActions = document.querySelector('#batchActions');
+      countEl.textContent = count;
+      batchActions.style.display = count > 0 ? 'flex' : 'none';
+    }
+    
+    async function batchMarkFavorite() {
+      if (selectedBooks.size === 0) return;
+      try {
+        for (let bookId of selectedBooks) {
+          await setBookState(bookId, 'favorite', true);
+        }
+        clearSelection();
+        await performSearch();
+        showMessage('Marcados como favoritos');
+      } catch (error) {
+        console.error('Batch favorite error:', error);
+        showMessage('Error al marcar favoritos', 'error');
+      }
+    }
+    
+    async function batchMarkRead() {
+      if (selectedBooks.size === 0) return;
+      try {
+        for (let bookId of selectedBooks) {
+          await setBookState(bookId, 'read', true);
+        }
+        clearSelection();
+        await performSearch();
+        showMessage('Marcados como leídos');
+      } catch (error) {
+        console.error('Batch read error:', error);
+        showMessage('Error al marcar leídos', 'error');
+      }
+    }
+    
+    // Reading Time Estimation
+    function estimateReadingTime(bookId) {
+      const book = state.items.find(b => b.id === bookId);
+      if (!book || !book.word_count) return null;
+      
+      const wordsPerMinute = 250; // Average reading speed
+      const totalMinutes = book.word_count / wordsPerMinute;
+      const progressPercent = book.progress_percent || 0;
+      const remainingMinutes = totalMinutes * (1 - progressPercent / 100);
+      
+      if (remainingMinutes < 60) return `${Math.round(remainingMinutes)}min`;
+      return `${Math.round(remainingMinutes / 60)}h`;
+    }
+    
+    // Auto Night Mode
+    function checkAutoNightMode() {
+      if (autoNightMode) {
+        const hour = new Date().getHours();
+        const shouldBeNight = hour < 7 || hour > 20;
+        if (shouldBeNight !== nightMode) {
+          toggleNightMode();
+        }
+      }
+    }
+    
+    function toggleNightMode() {
+      nightMode = !nightMode;
+      document.body.classList.toggle('night-mode', nightMode);
+      localStorage.setItem('nightMode', nightMode);
+    }
+    
+    // Bookmark Management
+    function addBookmark(bookId, position, note = '') {
+      if (!bookmarks[bookId]) bookmarks[bookId] = [];
+      const bookmark = {
+        id: Date.now(),
+        position,
+        note,
+        timestamp: new Date().toISOString()
+      };
+      bookmarks[bookId].push(bookmark);
+      saveBookmarks();
+      return bookmark.id;
+    }
+    
+    function removeBookmark(bookId, bookmarkId) {
+      if (!bookmarks[bookId]) return;
+      bookmarks[bookId] = bookmarks[bookId].filter(b => b.id !== bookmarkId);
+      saveBookmarks();
+    }
+    
+    function getBookmarks(bookId) {
+      return bookmarks[bookId] || [];
+    }
+    
+    function saveBookmarks() {
+      localStorage.setItem('bookmarks', JSON.stringify(bookmarks));
+    }
+    
+    function loadBookmarks() {
+      const saved = localStorage.getItem('bookmarks');
+      if (saved) {
+        try {
+          bookmarks = JSON.parse(saved);
+        } catch (error) {
+          console.error('Error loading bookmarks:', error);
+          bookmarks = {};
+        }
+      }
+    }
+    
+    // Notes Management
+    function setNote(bookId, note) {
+      if (!notes[bookId]) notes[bookId] = {};
+      notes[bookId].note = note;
+      notes[bookId].timestamp = new Date().toISOString();
+      saveNotes();
+    }
+    
+    function getNote(bookId) {
+      return notes[bookId]?.note || '';
+    }
+    
+    function saveNotes() {
+      localStorage.setItem('notes', JSON.stringify(notes));
+    }
+    
+    function loadNotes() {
+      const saved = localStorage.getItem('notes');
+      if (saved) {
+        try {
+          notes = JSON.parse(saved);
+        } catch (error) {
+          console.error('Error loading notes:', error);
+          notes = {};
+        }
+      }
+    }
+
+    // Messages and notifications
+    function showMessage(message, type = 'info') {
+      // Create message element if it doesn't exist
+      let messageEl = document.querySelector('#message-toast');
+      if (!messageEl) {
+        messageEl = document.createElement('div');
+        messageEl.id = 'message-toast';
+        messageEl.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: var(--panel-solid);
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          padding: 1rem 1.5rem;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+          z-index: 1000;
+          transform: translateX(400px);
+          transition: transform 0.3s ease;
+          max-width: 300px;
+        `;
+        document.body.appendChild(messageEl);
+      }
+      
+      // Set message and type
+      messageEl.textContent = message;
+      messageEl.className = `message-${type}`;
+      
+      // Add type-specific styling
+      if (type === 'success') {
+        messageEl.style.borderColor = '#34c759';
+        messageEl.style.color = '#34c759';
+      } else if (type === 'error') {
+        messageEl.style.borderColor = '#ff3b30';
+        messageEl.style.color = '#ff3b30';
+      } else {
+        messageEl.style.borderColor = 'var(--accent)';
+        messageEl.style.color = 'var(--fg)';
+      }
+      
+      // Show message
+      messageEl.style.transform = 'translateX(0)';
+      
+      // Hide after 3 seconds
+      setTimeout(() => {
+        messageEl.style.transform = 'translateX(400px)';
+      }, 3000);
     }
 
     // Interactions
@@ -456,8 +1224,26 @@
     }
     async function enrich(id) {
       setStatus(t('enriching'));
-      try { const res = await fetchJSON(api(`/enrich/${id}`), { method: 'POST' }); setStatus(`${t('enriched')}: ${res.status ?? 'ok'}`); await search(); }
-      catch(e){ setStatus(`${t('error')}: ${e.message}`); }
+      // Encontrar la ficha del libro y añadir clase de carga
+      const bookCard = document.querySelector(`[data-book-id="${id}"]`);
+      if (bookCard) {
+        bookCard.classList.add('enriching');
+      }
+      
+      try { 
+        const res = await fetchJSON(api(`/enrich/${id}`), { method: 'POST' }); 
+        setStatus(`${t('enriched')}: ${res.status ?? 'ok'}`); 
+        await performSearch(); // Usar performSearch en lugar de search
+        showMessage('Libro enriquecido correctamente', 'success');
+      } catch(e) { 
+        setStatus(`${t('error')}: ${e.message}`); 
+        showMessage(`Error al enriquecer: ${e.message}`, 'error');
+      } finally {
+        // Remover clase de carga
+        if (bookCard) {
+          bookCard.classList.remove('enriching');
+        }
+      }
     }
 
     // Enrich All / New
@@ -501,7 +1287,7 @@
     }
 
     // Events
-    document.getElementById('btnSearch').addEventListener('click', () => { state.page = 1; search(); });
+    document.getElementById('btnSearch').addEventListener('click', () => { state.page = 1; const q = document.querySelector('#q').value.trim(); if (q) saveSearch(q); search(); });
     document.getElementById('prev').addEventListener('click', () => { if (state.page>1){ state.page--; search(); }});
     document.getElementById('next').addEventListener('click', () => { const max = Math.ceil(state.total/state.page_size); if (state.page<max){ state.page++; search(); }});
     document.getElementById('btnReindex').addEventListener('click', async () => {
@@ -516,13 +1302,57 @@
     document.getElementById('btnEnrichNew').addEventListener('click', async () => {
       enrichAll({ only_never: true });
     });
-    document.addEventListener('click', (e) => {
-      const tEl = e.target.closest('button, a');
-      if (!tEl) return;
-      if (tEl.tagName === 'BUTTON' && tEl.dataset.open) openBook(tEl.dataset.open);
-      if (tEl.tagName === 'BUTTON' && tEl.dataset.enrich) enrich(tEl.dataset.enrich);
+    document.addEventListener('click', async (e) => {
+      // Batch mode button
+      if (e.target.id === 'batchBtn') {
+        toggleBatchMode();
+        return;
+      }
+      
+      // Batch operations
+      if (e.target.id === 'selectAllBtn') {
+        selectAllBooks();
+        return;
+      }
+      
+      if (e.target.id === 'clearSelectionBtn') {
+        clearSelection();
+        return;
+      }
+      
+      if (e.target.id === 'batchFavoriteBtn') {
+        await batchMarkFavorite();
+        return;
+      }
+      
+      if (e.target.id === 'batchReadBtn') {
+        await batchMarkRead();
+        return;
+      }
+      
+      // Book actions - buscar el elemento más cercano con data attributes
+      const target = e.target.closest('button[data-enrich], button[data-info]');
+      if (target) {
+        e.stopPropagation();
+        if (target.dataset.enrich) {
+          await enrich(parseInt(target.dataset.enrich));
+        } else if (target.dataset.info) {
+          await showBookInfo(parseInt(target.dataset.info));
+        }
+        return;
+      }
     });
-    document.addEventListener('keydown', (e)=>{ if (e.key === 'Enter' && ['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) { e.preventDefault(); state.page = 1; search(); }});
+    document.addEventListener('keydown', (e)=>{
+      if (['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) {
+        if (e.key === 'Enter') { e.preventDefault(); state.page = 1; const q = document.querySelector('#q').value.trim(); if (q) saveSearch(q); search(); }
+        return;
+      }
+      // Global shortcuts
+      if (e.key === ' ') { e.preventDefault(); const r = document.getElementById('reader'); if (r) r.scrollBy(0, r.clientHeight * 0.8); }
+      if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
+      if (readerPrefs.mode==='paged' && ['ArrowRight','PageDown'].includes(e.key)) { e.preventDefault(); pageNext(); }
+      if (readerPrefs.mode==='paged' && ['ArrowLeft','PageUp'].includes(e.key)) { e.preventDefault(); pagePrev(); }
+    });
 
     // Theme + language init
     document.getElementById('btn-theme-auto').addEventListener('click', ()=>setTheme('auto'));
@@ -556,6 +1386,8 @@
       } catch(e) { /* ignore */ }
       // Always perform an initial search
       search();
+      // Render history after initial load
+      renderHistory();
     })();
 
   // -------- Reader controls --------
@@ -635,6 +1467,52 @@
       document.exitFullscreen?.();
     }
   }
+  
+  // Book info modal
+  function showBookInfo(bookId) {
+    // Simple implementation - could be enhanced with a proper modal
+    fetchJSON(api(`/books/${bookId}`)).then(book => {
+      const enriched = book.enriched || {};
+      const premise = enriched.premise || (enriched.localized?.es?.premise) || 'Sin descripción disponible';
+      const tags = enriched.tags?.join(', ') || 'Sin etiquetas';
+      const info = `
+Título: ${book.title}
+Autor: ${book.author}
+Idioma: ${book.language || 'N/A'}
+Género: ${book.genre || 'N/A'}
+Año: ${book.year || 'N/A'}
+Estado: ${book.read ? 'Leído' : book.pending ? 'Pendiente' : book.favorite ? 'Favorito' : 'Sin marcar'}
+
+Descripción: ${premise}
+
+Etiquetas: ${tags}
+      `.trim();
+      alert(info); // Simple alert - could be replaced with a proper modal
+    }).catch(() => alert('Error al cargar información del libro'));
+  }
+  
+  // History breadcrumbs
+  function renderHistory() {
+    const header = document.querySelector('.wrap.nav');
+    let historyDiv = document.getElementById('historyDiv');
+    if (!historyDiv && recentBooks.length > 0) {
+      historyDiv = document.createElement('div');
+      historyDiv.id = 'historyDiv';
+      historyDiv.className = 'history';
+      historyDiv.innerHTML = '<span style="font-size: .75rem; color: var(--muted);">Reciente:</span>';
+      header.appendChild(historyDiv);
+    }
+    if (historyDiv && recentBooks.length === 0) {
+      historyDiv.remove();
+      return;
+    }
+    if (historyDiv) {
+      const items = recentBooks.slice(0, 5).map(book => 
+        `<span class="history-item" onclick="openBook(${book.id})">${book.title}</span>`
+      ).join('');
+      historyDiv.innerHTML = `<span style="font-size: .75rem; color: var(--muted);">Reciente:</span> ${items}`;
+    }
+  }
   // Buttons
   document.getElementById('btnModeScroll').addEventListener('click', ()=>{ readerPrefs.mode='scroll'; saveReaderPrefs(); applyReaderPrefs(); });
   document.getElementById('btnModePaged').addEventListener('click', ()=>{ readerPrefs.mode='paged'; saveReaderPrefs(); applyReaderPrefs(); });
@@ -650,7 +1528,11 @@
     if (readerPrefs.mode==='paged') { e.preventDefault(); if (e.deltaY > 0) pageNext(); else if (e.deltaY < 0) pagePrev(); }
   }, { passive: false });
   document.addEventListener('keydown', (e)=>{ if (readerPrefs.mode==='paged' && ['ArrowRight','PageDown'].includes(e.key)) { e.preventDefault(); pageNext(); } if (readerPrefs.mode==='paged' && ['ArrowLeft','PageUp'].includes(e.key)) { e.preventDefault(); pagePrev(); } });
+  // Double click for fullscreen
+  document.getElementById('reader').addEventListener('dblclick', toggleFullscreen);
+  
   loadReaderPrefs(); applyReaderPrefs();
+  loadHistory(); loadSearchHistory();
 
   // ---------- State toggles (favorite/read/pending) ----------
   async function updateStateToggles(detail){
@@ -672,6 +1554,30 @@
     group.classList.toggle('is-read', !!detail.read);
     group.classList.toggle('is-pending', !!detail.pending);
   }
+
+  // Initialize app
+  async function init() {
+    loadBookmarks();
+    loadNotes();
+    
+    // Load saved preferences
+    const savedNightMode = localStorage.getItem('nightMode');
+    if (savedNightMode) {
+      nightMode = savedNightMode === 'true';
+      document.body.classList.toggle('night-mode', nightMode);
+    }
+    
+    // Check auto night mode
+    checkAutoNightMode();
+    setInterval(checkAutoNightMode, 60000); // Check every minute
+    
+    await loadFilters();
+    await performSearch();
+    setInterval(loadRecentHistory, 30000); // Update history every 30s
+  }
+
+  // Start the app
+  document.addEventListener('DOMContentLoaded', init);
   </script>
 </body>
 </html>

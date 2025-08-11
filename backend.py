@@ -50,7 +50,7 @@ class AppConfig(BaseModel):
     db_path: str = Field(default=str(Path.cwd() / "skald.db"))
     lm_enabled: bool = False
     lm_url: str = "http://localhost:1234/api/predict"
-    lm_timeout: float = 15.0
+    lm_timeout: float = 90.0  # Aumentado a 90 segundos para modelos lentos
     lm_mock: bool = True
     cors_origins: List[str] = Field(default_factory=lambda: ["*"])
     page_size_default: int = 20
@@ -385,7 +385,7 @@ class LMClient:
     def __init__(
         self,
         base_url: str,
-        timeout: float = 15.0,
+        timeout: float = 300.0,  # Aumentado a 60 segundos para modelos lentos
         enabled: bool = False,
         mock: bool = False,
         model: Optional[str] = None,
@@ -427,7 +427,7 @@ class LMClient:
             }
             return payload, "ok"
 
-        tries = 10
+        tries = 3  # Reducido a 3 intentos pero con timeout mayor
         last_err: Optional[Exception] = None
         # Determine OpenAI-style endpoint; if user gave root or other path, normalize to root + /v1/chat/completions
         is_openai_style = "/v1/chat/completions" in self.base_url
@@ -450,20 +450,22 @@ class LMClient:
         for attempt in range(1, tries + 1):
             try:
                 # Try OpenAI-style first
+                LOGGER.info("LM enrich attempt %d/%d (openai-style) for '%s' by %s", attempt, tries, title, author)
                 prompt = self._build_prompt(author, title)
                 schema = self._json_schema()
                 openai_payload = {
                     "model": self.model,
                     "messages": [
                         {"role": "system", "content": (
-                            "Eres un experto bibliotecario. Tu tarea es completar metadatos de libros. "
-                            "Responde siempre en JSON válido y exclusivamente JSON, sin texto adicional, sin markdown, sin bloques de código. "
-                            "Si desconoces un campo, usa null o []. Respeta estrictamente el esquema y los tipos."
+                            "You are an expert librarian and literary analyst. Your task is to enrich book metadata. "
+                            "Respond with ONLY valid JSON, no additional text, no markdown, no code blocks. "
+                            "If you don't know a field, use null or []. Strictly follow the schema and data types. "
+                            "Focus on accuracy and provide helpful categorization."
                         )},
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.1,
-                    "max_tokens": 900,
+                    "max_tokens": 800,  # Reducido para respuestas más concisas
                     # LMStudio requires json_schema or text
                     "response_format": {
                         "type": "json_schema",
@@ -473,6 +475,8 @@ class LMClient:
                         },
                     },
                 }
+                LOGGER.debug("LM request payload: model=%s, timeout=%s, prompt_length=%d", 
+                           self.model, self.timeout, len(prompt))
                 with httpx.Client(timeout=self.timeout) as client:
                     with lm_rate_limit():
                         resp = client.post(
@@ -480,6 +484,8 @@ class LMClient:
                             json=openai_payload,
                             headers={"Content-Type": "application/json", "Accept": "application/json"},
                         )
+                LOGGER.debug("LM response: status=%d, content_length=%d", resp.status_code, 
+                           len(resp.content) if resp.content else 0)
                 if resp.status_code == 200:
                     data = resp.json()
                     content = (data.get("choices", [{}])[0].get("message", {}).get("content", ""))
@@ -521,10 +527,19 @@ class LMClient:
                             payload_t.setdefault("enriched_at", now_iso)
                             return payload_t, "ok"
                     raise RuntimeError(f"OpenAI-style HTTP {resp.status_code}: {resp.text[:200]}")
+            except (httpx.TimeoutException, httpx.ConnectTimeout, httpx.ReadTimeout) as e1:
+                last_err = e1
+                LOGGER.warning("LM enrich attempt %d (openai) timed out after %ds: %s", attempt, self.timeout, e1)
+                # Don't try legacy on timeout, just retry with backoff
+                if attempt < tries:
+                    wait_time = min(5 * attempt, 15)  # Backoff: 5, 10, 15 segundos
+                    LOGGER.info("Waiting %ds before retry...", wait_time)
+                    time.sleep(wait_time)
+                continue
             except Exception as e1:
                 last_err = e1
                 LOGGER.warning("LM enrich attempt %d (openai) failed: %s", attempt, e1)
-                # Try legacy endpoint as fallback
+                # Try legacy endpoint as fallback only for non-timeout errors
                 try:
                     with httpx.Client(timeout=self.timeout) as client:
                         with lm_rate_limit():
@@ -561,40 +576,20 @@ class LMClient:
         return None, "failed"
 
     def _build_prompt(self, author: str, title: str) -> str:
-        # Spanish prompt with embedded JSON template (if available) and clear constraints
-        schema_or_template = self._template_json_str or (
-            "{\n"
-            '  "genre": null,\n'
-            '  "year": null,\n'
-            '  "series": null,\n'
-            '  "series_number": null,\n'
-            '  "audience": null,\n'
-            '  "tags": [],\n'
-            '  "content_warnings": [],\n'
-            '  "premise": null,\n'
-            '  "confidence": null,\n'
-            '  "localized": {\n'
-            '    "es": {"premise": null, "tags": []},\n'
-            '    "en": {"premise": null, "tags": []},\n'
-            '    "fr": {"premise": null, "tags": []},\n'
-            '    "de": {"premise": null, "tags": []},\n'
-            '    "pt": {"premise": null, "tags": []}\n'
-            "  }\n"
-            "}"
-        )
+        # Simplified English prompt for better results
         return (
-            "Eres un experto bibliotecario y analista literario. "
-            "Necesito que completes el siguiente JSON de metadatos para el libro indicado.\n\n"
-            f"Libro: autor=\"{author}\", titulo=\"{title}\".\n\n"
-            "Instrucciones estrictas:\n"
-            "- Devuelve ÚNICAMENTE un JSON válido. Nada de explicaciones, ni markdown, ni bloques ```json.\n"
-            "- Rellena valores plausibles; si un dato no se conoce, usa null o [].\n"
-            "- Respeta los nombres de clave y tipos. No añadas claves nuevas.\n"
-            "- Las etiquetas (tags) deben ser cortas (1–3 palabras).\n"
-            "- Incluye al menos un campo informativo (género, tags o premisa).\n"
-            "- Si puedes, completa también localized.es con la sinopsis y etiquetas en español.\n\n"
-            "Plantilla a rellenar exactamente con estas claves:\n"
-            f"{schema_or_template}\n"
+            f"Analyze this book and return metadata as JSON:\n\n"
+            f"Author: \"{author}\"\n"
+            f"Title: \"{title}\"\n\n"
+            "Instructions:\n"
+            "- Return ONLY valid JSON, no explanations\n"
+            "- Use null for unknown fields, [] for empty arrays\n"
+            "- Keep tags short and relevant (max 8)\n"
+            "- Write premise without spoilers (100-200 words)\n"
+            "- Include Spanish translation in localized.es.premise if possible\n"
+            "- Set confidence 0.0-1.0 based on your knowledge of this book\n\n"
+            "Focus on: genre, year, audience (children/young_adult/adult/general), "
+            "series info if applicable, descriptive tags, and brief premise."
         )
 
     @staticmethod

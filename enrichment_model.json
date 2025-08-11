@@ -1,18 +1,92 @@
 {
-  "genre": null,
-  "year": null,
-  "series": null,
-  "series_number": null,
-  "audience": null,
-  "tags": [],
-  "content_warnings": [],
-  "premise": null,
-  "confidence": null,
-  "localized": {
-    "es": { "premise": null, "tags": [] },
-    "en": { "premise": null, "tags": [] },
-    "fr": { "premise": null, "tags": [] },
-    "de": { "premise": null, "tags": [] },
-    "pt": { "premise": null, "tags": [] }
-  }
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Book Metadata Enrichment Schema",
+  "description": "Simplified metadata structure for book enrichment",
+  "properties": {
+    "genre": {
+      "type": ["string", "null"],
+      "description": "Primary literary genre (e.g., 'Science Fiction', 'Romance', 'Mystery', 'Fantasy', 'Biography', etc.)"
+    },
+    "year": {
+      "type": ["integer", "null"],
+      "description": "Publication year (original publication)",
+      "minimum": -3000,
+      "maximum": 2030
+    },
+    "series": {
+      "type": ["string", "null"],
+      "description": "Series name if the book is part of a series"
+    },
+    "series_number": {
+      "type": ["integer", "null"],
+      "description": "Position in the series (1, 2, 3, etc.)",
+      "minimum": 1
+    },
+    "audience": {
+      "type": "string",
+      "enum": ["children", "young_adult", "adult", "general"],
+      "description": "Target audience classification"
+    },
+    "tags": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Thematic tags and keywords (max 8)",
+      "maxItems": 8
+    },
+    "content_warnings": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Content warnings for sensitive topics",
+      "maxItems": 3
+    },
+    "premise": {
+      "type": ["string", "null"],
+      "description": "Book summary without spoilers (English, 100-200 words)",
+      "maxLength": 800
+    },
+    "localized": {
+      "type": "object",
+      "description": "Language-specific summaries",
+      "properties": {
+        "es": {
+          "type": "object",
+          "properties": {
+            "premise": {
+              "type": ["string", "null"],
+              "description": "Book summary in Spanish without spoilers (100-200 words)",
+              "maxLength": 800
+            }
+          }
+        },
+        "en": {
+          "type": "object", 
+          "properties": {
+            "premise": {
+              "type": ["string", "null"],
+              "description": "Book summary in English without spoilers (100-200 words)",
+              "maxLength": 800
+            }
+          }
+        }
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Confidence level in the metadata accuracy (0.0-1.0)"
+    },
+    "enriched_by": {
+      "type": "string",
+      "description": "Source of enrichment (e.g., 'LMStudio-gpt-oss-20b')"
+    },
+    "enriched_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO timestamp of when enrichment was performed"
+    }
+  },
+  "required": ["audience", "confidence", "enriched_by", "enriched_at"],
+  "additionalProperties": false
 }

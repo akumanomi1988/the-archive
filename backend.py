@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 import threading
 from contextlib import contextmanager
+import unicodedata
+import hashlib
 
 import bleach
 import httpx
@@ -37,7 +39,6 @@ from sqlalchemy import Column, String
 from sqlalchemy.dialects.sqlite import JSON as SQLITE_JSON
 from sqlmodel import Field as SQLField, Session, SQLModel, create_engine, select
 from sqlalchemy import Integer
-import hashlib
 
 
 # ------------------------------------------------------------
@@ -50,16 +51,18 @@ class AppConfig(BaseModel):
     db_path: str = Field(default=str(Path.cwd() / "skald.db"))
     lm_enabled: bool = False
     lm_url: str = "http://localhost:1234/v1/chat/completions"
-    lm_timeout: float = 90.0  # Aumentado a 90 segundos para modelos lentos
+    lm_timeout: float = 300.0  # Aumentado a 90 segundos para modelos lentos
     lm_mock: bool = True
     cors_origins: List[str] = Field(default_factory=lambda: ["*"])
     page_size_default: int = 20
     enrichment_batch_size: int = 10
+    # Default language used for enrichment summaries if none is provided by the client/frontend
+    default_language: str = "es"
     # Optional model name for OpenAI-style LMStudio endpoint
     lm_model: Optional[str] = "openai/gpt-oss-20"
-    # LM rate limiting - Máximo 3 libros siendo enriquecidos simultáneamente para evitar timeouts
-    lm_max_concurrency: int = 3
-    lm_min_interval_ms: int = 500  # Intervalo más largo entre peticiones
+    # LM rate limiting - Máximo 1 libro siendo enriquecido simultáneamente para evitar timeouts
+    lm_max_concurrency: int = 1
+    lm_min_interval_ms: int = 10000  # Intervalo más largo entre peticiones
 
     @field_validator("page_size_default", "enrichment_batch_size", "lm_max_concurrency", "lm_min_interval_ms")
     def _positive(cls, v: int):  # type: ignore[override]
@@ -69,6 +72,7 @@ class AppConfig(BaseModel):
 
 
 def load_config(path_override: Optional[str | Path] = None) -> AppConfig:
+    logger = logging.getLogger("skald")
     cfg_path_env = os.environ.get("SKALD_CONFIG")
     candidate_paths: List[Path] = []
     if path_override:
@@ -80,12 +84,16 @@ def load_config(path_override: Optional[str | Path] = None) -> AppConfig:
     for p in candidate_paths:
         try:
             if p.exists():
+                logger.info("Loading configuration from: %s", p)
                 with p.open("r", encoding="utf-8") as f:
                     data = json.load(f)
-                return AppConfig(**data)
+                config = AppConfig(**data)
+                logger.info("Configuration loaded successfully: lm_enabled=%s, lm_timeout=%s, lm_max_concurrency=%s, lm_min_interval_ms=%s", 
+                           config.lm_enabled, config.lm_timeout, config.lm_max_concurrency, config.lm_min_interval_ms)
+                return config
         except Exception as e:
-            logging.getLogger("skald").warning("Failed loading config from %s: %s", p, e)
-    logging.getLogger("skald").info("Using default in-memory config; create config.json or set SKALD_CONFIG to customize.")
+            logger.warning("Failed loading config from %s: %s", p, e)
+    logger.info("Using default in-memory config; create config.json or set SKALD_CONFIG to customize.")
     return AppConfig()
 
 
@@ -167,7 +175,10 @@ def lm_rate_limit():
             if min_interval > 0:
                 delta = now - LM_LAST_REQUEST
                 if delta < min_interval:
-                    time.sleep(min_interval - delta)
+                    wait_time = min_interval - delta
+                    LOGGER.info("LM rate limiting: waiting %.2fs before next request (min_interval=%.2fs)", 
+                               wait_time, min_interval)
+                    time.sleep(wait_time)
             LM_LAST_REQUEST = time.monotonic()
         yield
     finally:
@@ -186,8 +197,11 @@ def init_app(config_path: Optional[str] = None) -> None:
     ENGINE = create_engine(f"sqlite:///{DB_PATH.as_posix()}", echo=False)
     SQLModel.metadata.create_all(ENGINE)
     # Init LM rate limiter
-    LM_SEMAPHORE = threading.Semaphore(max(1, int(CONFIG.lm_max_concurrency)))
+    max_concurrency = max(1, int(CONFIG.lm_max_concurrency))
+    LM_SEMAPHORE = threading.Semaphore(max_concurrency)
     LM_LAST_REQUEST = 0.0
+    LOGGER.info("LM rate limiter initialized: max_concurrency=%d, min_interval_ms=%d", 
+               max_concurrency, CONFIG.lm_min_interval_ms)
     # Recreate LM client with possibly new config
     LM = LMClient(
         CONFIG.lm_url,
@@ -196,6 +210,8 @@ def init_app(config_path: Optional[str] = None) -> None:
         mock=CONFIG.lm_mock,
         model=CONFIG.lm_model,
     )
+    LOGGER.info("LM client initialized: url=%s, timeout=%s, enabled=%s, mock=%s, model=%s", 
+               CONFIG.lm_url, CONFIG.lm_timeout, CONFIG.lm_enabled, CONFIG.lm_mock, CONFIG.lm_model)
 
 
 def get_session() -> Iterable[Session]:
@@ -218,6 +234,42 @@ def compute_sha256(file_path: Path, chunk_size: int = 1024 * 1024) -> str:
                 break
             h.update(chunk)
     return h.hexdigest()
+
+
+def clean_text(text: str) -> str:
+    """Clean text by normalizing Unicode and removing non-printable characters.
+    
+    Handles common issues from AI models like \u2011, \u00f3, etc.
+    """
+    if not isinstance(text, str):
+        return str(text) if text is not None else ""
+    
+    # Normalize Unicode to decomposed form, then recompose
+    text = unicodedata.normalize('NFKC', text)
+    
+    # Replace problematic Unicode characters
+    replacements = {
+        '\u2011': '-',  # Non-breaking hyphen
+        '\u2013': '-',  # En dash
+        '\u2014': '--', # Em dash
+        '\u2018': "'",  # Left single quotation mark
+        '\u2019': "'",  # Right single quotation mark
+        '\u201C': '"',  # Left double quotation mark
+        '\u201D': '"',  # Right double quotation mark
+        '\u2026': '...', # Horizontal ellipsis
+        '\u00A0': ' ',  # Non-breaking space
+    }
+    
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    
+    # Remove other non-printable characters but keep common whitespace
+    text = ''.join(char for char in text if unicodedata.category(char)[0] not in 'C' or char in '\t\n\r ')
+    
+    # Clean up multiple spaces and trim
+    text = ' '.join(text.split())
+    
+    return text
 
 
 def derive_author_title_from_path(epub_path: Path) -> Tuple[Optional[str], Optional[str]]:
@@ -404,29 +456,97 @@ class LMClient:
         except Exception as e:
             LOGGER.debug("Could not load enrichment_model.json: %s", e)
 
-    def _build_simple_prompt(self, author: str, title: str) -> str:
-        """Simple prompt without complex JSON schema."""
-        return f"""Analyze this book and return basic metadata as simple JSON:
+    def _build_simple_prompt(self, author: str, title: str, lang: Optional[str] = None) -> str:
+        """Minimal prompt for basic enrichment with language control.
 
-Author: "{author}"
-Title: "{title}"
+        Keeps the expected JSON tiny and easy for local models to follow.
+        """
+        target_lang = (lang or CONFIG.default_language or "es").strip()
+        example_str = (
+            "{\n"
+            "  \"genre\": \"Non-fiction\",\n"
+            "  \"year\": 2002,\n"
+            "  \"audience\": \"adult\",\n"
+            "  \"confidence\": 0.8,\n"
+            "  \"tags\": [\"science\", \"astronomy\", \"physics\", \"cosmology\", \"history\"],\n"
+            "  \"premise\": \"Brief summary without spoilers...\"\n"
+            "}"
+        )
 
-Return this JSON structure (replace with actual data or null if unknown):
-{{
-  "genre": "Fantasy",
-  "year": 2020,
-  "audience": "adult",
-  "confidence": 0.8,
-  "tags": ["fantasy", "adventure"],
-  "premise": "Brief summary without spoilers..."
-}}
+        return (
+            "Analyze this book and return basic metadata as JSON.\n\n"
+            f"Author: \"{author}\"\n"
+            f"Title: \"{title}\"\n\n"
+            f"Write ALL fields (including tags and the summary) in this language: \"{target_lang}\".\n"
+            "Do NOT include your reasoning. Only return the final JSON object.\n\n"
+            "Return ONLY a valid JSON object matching this structure (replace values with real data or null only if truly unknown):\n"
+            f"{example_str}\n\n"
+            "Rules:\n"
+            "- REQUIRED: provide genre, at least 4 tags, and a summary (premise) in the target language\n"
+            "- audience must be one of: \"children\", \"young_adult\", \"adult\", \"general\"\n"
+            "- confidence between 0.0 and 1.0 (certainty)\n"
+            "- tags are short keywords (3-8 items)\n"
+            "- summary: 120-200 words, spoiler-free\n"
+            "- NO explanations, ONLY the JSON"
+        )
 
-Rules:
-- audience must be one of: "children", "young_adult", "adult", "general"
-- confidence is 0.0 to 1.0 (your certainty about the info)
-- tags are short keywords (max 5)
-- Use null for unknown values
-- NO explanations, ONLY the JSON"""
+    def _example_from_schema(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """Derive a minimal example JSON object from a JSON Schema.
+
+        Focuses on the top-level object's properties; picks reasonable
+        placeholder values and keeps shape consistent. Unknowns default to null/empty.
+        """
+        def pick_example(prop_schema: Dict[str, Any]) -> Any:
+            t = prop_schema.get("type")
+            # Normalize 'type' as list for easier handling
+            types: List[str] = []
+            if isinstance(t, list):
+                types = [str(x) for x in t]
+            elif isinstance(t, str):
+                types = [t]
+
+            # Prefer concrete type if union includes null
+            non_null = [x for x in types if x != "null"]
+            main_t = non_null[0] if non_null else (types[0] if types else None)
+
+            if isinstance(prop_schema.get("enum"), list) and prop_schema.get("enum"):
+                # Choose the first enum option for example
+                return prop_schema["enum"][0]
+
+            # If nullable, prefer showing null in the example to signal unknown allowed
+            if "null" in types:
+                return None
+
+            if main_t == "string":
+                return ""
+            if main_t == "integer":
+                return 0
+            if main_t == "number":
+                return 0.0
+            if main_t == "array":
+                items = prop_schema.get("items") or {}
+                # Provide one example element only if items has enum; otherwise empty
+                if isinstance(items, dict) and isinstance(items.get("enum"), list) and items.get("enum"):
+                    return [items["enum"][0]]
+                return []
+            if main_t == "object":
+                # Recurse one level for nested object
+                if isinstance(prop_schema.get("properties"), dict):
+                    return {k: pick_example(v) for k, v in prop_schema["properties"].items()}
+                return {}
+            # Default for null/unknown types
+            return None
+
+        if not isinstance(schema, dict) or schema.get("type") != "object":
+            return {}
+        props = schema.get("properties")
+        if not isinstance(props, dict):
+            return {}
+        example: Dict[str, Any] = {}
+        for key, prop_schema in props.items():
+            if isinstance(prop_schema, dict):
+                example[key] = pick_example(prop_schema)
+        return example
 
     def _mock_enrichment(self) -> Dict[str, Any]:
         """Mock enrichment data for testing."""
@@ -439,7 +559,7 @@ Rules:
             "premise": "Mock enrichment data for testing.",
         }
 
-    def enrich_simple(self, author: str, title: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    def enrich_simple(self, author: str, title: str, lang: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], str]:
         """Simplified enrichment method."""
         if not self.enabled:
             return None, "disabled"
@@ -461,7 +581,7 @@ Rules:
         
         for attempt in range(1, tries + 1):
             try:
-                prompt = self._build_simple_prompt(author, title)
+                prompt = self._build_simple_prompt(author, title, lang=lang)
                 
                 payload = {
                     "model": self.model,
@@ -485,29 +605,73 @@ Rules:
                 if resp.status_code == 200:
                     data = resp.json()
                     content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    LOGGER.info("LM raw response:\n%s", content)
+                    LOGGER.info("LM raw response from model:\n--- RAW RESPONSE START ---\n%s\n--- RAW RESPONSE END ---", content)
                     
                     # Parse JSON
                     try:
-                        result = json.loads(content) if isinstance(content, str) else content
+                        # Prefer the last JSON object in the content (models with reasoning may emit multiple)
+                        text = content if isinstance(content, str) else str(content)
+                        import re
+                        json_candidates = re.findall(r"\{[\s\S]*?\}", text)
+                        if json_candidates:
+                            candidate = json_candidates[-1]
+                            result = json.loads(candidate)
+                        else:
+                            result = json.loads(text)
+                        LOGGER.info("LM parsed JSON data:\n--- PARSED JSON START ---\n%s\n--- PARSED JSON END ---", json.dumps(result, indent=2, ensure_ascii=False))
                     except json.JSONDecodeError:
                         # Try to extract JSON from text
                         import re
-                        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                        json_match = re.search(r'\{[\s\S]*\}', content, re.DOTALL)
                         if json_match:
-                            result = json.loads(json_match.group())
+                            extracted_json = json_match.group()
+                            LOGGER.info("LM extracted JSON from text:\n--- EXTRACTED JSON START ---\n%s\n--- EXTRACTED JSON END ---", extracted_json)
+                            result = json.loads(extracted_json)
+                            LOGGER.info("LM parsed extracted JSON:\n--- FINAL JSON START ---\n%s\n--- FINAL JSON END ---", json.dumps(result, indent=2, ensure_ascii=False))
                         else:
+                            LOGGER.error("LM could not extract JSON from response: %s", content[:500])
                             raise ValueError("No valid JSON found in response")
                     
                     # Basic validation
                     if not isinstance(result, dict):
                         raise ValueError("Response is not a JSON object")
+
+                    # Clean Unicode and non-printable characters from text fields
+                    for key, value in result.items():
+                        if isinstance(value, str):
+                            result[key] = clean_text(value)
+                        elif isinstance(value, list):
+                            result[key] = [clean_text(item) if isinstance(item, str) else item for item in value]
+
+                    # Light checks for richer content
+                    def is_thin(r: Dict[str, Any]) -> bool:
+                        genre_ok = bool((r.get("genre") or "").strip())
+                        premise_len = len((r.get("premise") or "").strip())
+                        tags_ok = isinstance(r.get("tags"), list) and len(r.get("tags") or []) >= 3
+                        return not (genre_ok and tags_ok and premise_len >= 80)
+
+                    if is_thin(result) and attempt < tries:
+                        LOGGER.info("LM result seems too thin; attempting one corrective retry")
+                        # Nudge by appending a short corrective hint to the user message
+                        payload["messages"][1]["content"] += "\n\nPlease include a concrete 'genre', at least 4 relevant 'tags', and a 120-200 word 'premise' in the target language."
+                        with httpx.Client(timeout=self.timeout) as client:
+                            with lm_rate_limit():
+                                resp2 = client.post(base_url, json=payload, headers={"Content-Type": "application/json"})
+                        if resp2.status_code == 200:
+                            data2 = resp2.json()
+                            content2 = data2.get("choices", [{}])[0].get("message", {}).get("content", "")
+                            try:
+                                result2 = json.loads(content2) if isinstance(content2, str) else content2
+                                if isinstance(result2, dict) and not is_thin(result2):
+                                    result = result2
+                            except Exception:
+                                pass
                     
                     # Add metadata
                     result["enriched_by"] = f"LMStudio:{self.model}"
                     result["enriched_at"] = now_iso
                     
-                    LOGGER.info("LM enrich successful")
+                    LOGGER.info("LM enrich successful - Final result:\n--- FINAL RESULT START ---\n%s\n--- FINAL RESULT END ---", json.dumps(result, indent=2, ensure_ascii=False))
                     return result, "ok"
                 else:
                     LOGGER.warning("LM error %d: %s", resp.status_code, resp.text[:200])
@@ -560,16 +724,15 @@ Rules:
                 # Fallback: assume given value is a host:port or root
                 root = self.base_url.split("/", 1)[0]
             openai_url = root.rstrip("/") + "/v1/chat/completions"
-        # Legacy endpoint should always be root + /api/predict
-        legacy_url = root.rstrip("/") + "/api/predict"
-        LOGGER.debug("LM endpoints openai=%s legacy=%s", openai_url, legacy_url)
+        # We no longer use legacy /api/predict; always use OpenAI-style with schema
+        LOGGER.debug("LM endpoint (openai-style)=%s", openai_url)
         for attempt in range(1, tries + 1):
             try:
                 # Try OpenAI-style first
                 LOGGER.info("LM enrich attempt %d/%d (openai-style) for '%s' by %s", attempt, tries, title, author)
                 prompt = self._build_prompt(author, title)
-                schema = self._json_schema()
-                LOGGER.info("LM JSON Schema sent to LMStudio: %s", json.dumps(schema, indent=2))
+                # schema = self._json_schema()
+                LOGGER.info("LM JSON Schema sent to LMStudio: %s", json.dumps(prompt, indent=2))
                 openai_payload = {
                     "model": self.model,
                     "messages": [
@@ -586,14 +749,6 @@ Rules:
                     ],
                     "temperature": 0.1,
                     "max_tokens": 800,  # Reducido para respuestas más concisas
-                    # LMStudio requires json_schema or text
-                    "response_format": {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "book_enrichment",
-                            "schema": schema,
-                        },
-                    },
                 }
                 LOGGER.debug("LM request payload: model=%s, timeout=%s, prompt_length=%d", 
                            self.model, self.timeout, len(prompt))
@@ -679,35 +834,9 @@ Rules:
             except Exception as e1:
                 last_err = e1
                 LOGGER.warning("LM enrich attempt %d (openai) failed: %s", attempt, e1)
-                # Try legacy endpoint as fallback only for non-timeout errors
-                try:
-                    with httpx.Client(timeout=self.timeout) as client:
-                        with lm_rate_limit():
-                            resp2 = client.post(
-                                legacy_url,
-                                json={"autor": author, "titulo": title},
-                                headers={"Content-Type": "application/json", "Accept": "application/json"},
-                            )
-                    if resp2.status_code != 200:
-                        raise RuntimeError(f"Legacy HTTP {resp2.status_code}")
-                    # Some legacy endpoints return plain text; parse loosely
-                    try:
-                        data2 = resp2.json()
-                    except Exception:
-                        data2 = self._parse_json_loose(resp2.text)
-                    payload2 = self._validate_payload(data2)
-                    meaningful_keys2 = [
-                        k for k in ("genre", "year", "series", "audience", "tags", "premise")
-                        if payload2.get(k)
-                    ]
-                    if not meaningful_keys2:
-                        raise ValueError("Empty/meaningless enrichment payload (legacy)")
-                    payload2.setdefault("enriched_by", "LMStudio")
-                    payload2.setdefault("enriched_at", now_iso)
-                    return payload2, "ok"
-                except Exception as e2:
-                    last_err = e2
-                    LOGGER.warning("LM enrich attempt %d (legacy) failed: %s", attempt, e2)
+                # No legacy fallback; keep last_err and continue retries
+                last_err = e1
+                LOGGER.debug("No legacy fallback; will retry openai-style if attempts remain")
             # Exponential backoff with jitter between attempts
             if attempt < tries:
                 backoff = min(0.5 * (2 ** (attempt - 1)), 8.0)  # cap at 8s
@@ -716,35 +845,25 @@ Rules:
         return None, "failed"
 
     def _build_prompt(self, author: str, title: str) -> str:
-        # Enhanced prompt with JSON structure example
+        # Schema-aligned prompt: embed the JSON Schema directly to avoid duplicates
+        try:
+            schema = self._json_schema()
+        except Exception:
+            schema = {}
+
+        schema_str = json.dumps(schema, indent=2, ensure_ascii=False)
+
+        instructions = (
+            "You MUST return ONLY a JSON object (no markdown, no code fences, no explanations) that VALIDATES against the provided JSON Schema.\n"
+            "If a field is unknown, use null (or [] for arrays). Keep tags concise."
+        )
+
         return (
-            f"Analyze this book and return metadata as JSON:\n\n"
+            f"Analyze this book and return metadata as JSON.\n\n"
             f"Author: \"{author}\"\n"
             f"Title: \"{title}\"\n\n"
-            "Return ONLY valid JSON in this exact structure:\n"
-            "{\n"
-            '  "genre": "Fantasy",  // or null if unknown\n'
-            '  "year": 2020,        // publication year as integer, or null\n'
-            '  "series": "Series Name",  // or null if not part of a series\n'
-            '  "series_number": 1,  // position in series as integer, or null\n'
-            '  "audience": "adult",  // REQUIRED: one of "children", "young_adult", "adult", "general"\n'
-            '  "tags": ["fantasy", "magic", "adventure"],  // array of strings, max 8\n'
-            '  "content_warnings": ["violence"],  // array of strings, max 3, or []\n'
-            '  "premise": "A brief spoiler-free summary...",  // or null\n'
-            '  "localized": {\n'
-            '    "es": {"premise": "Resumen en español..."},  // Spanish translation if possible\n'
-            '    "en": {"premise": "Summary in English..."}\n'
-            '  },\n'
-            '  "confidence": 0.8  // REQUIRED: number 0.0-1.0 based on your knowledge\n'
-            "}\n\n"
-            "Instructions:\n"
-            "- audience and confidence are REQUIRED fields\n"
-            "- Use null for unknown string/integer fields\n"
-            "- Use [] for empty arrays\n"
-            "- Keep tags short and relevant (max 8)\n"
-            "- Write premise without spoilers (100-200 words)\n"
-            "- Set confidence based on how well you know this book\n"
-            "- NO explanations, NO markdown, ONLY the JSON"
+            f"JSON Schema to follow:\n{schema_str}\n\n"
+            f"Instructions:\n{instructions}"
         )
 
     @staticmethod
@@ -1253,6 +1372,7 @@ def reindex(req: ReindexRequest, background: BackgroundTasks, session: Session =
 
 class EnrichBatchRequest(BaseModel):
     ids: Optional[List[int]] = None
+    language: Optional[str] = Field(default=None, description="Preferred language for summaries and labels")
 
 
 @app.post("/enrich/batch")
@@ -1269,7 +1389,7 @@ def enrich_batch(req: EnrichBatchRequest, session: Session = Depends(get_session
             select(Book).where(Book.enrichment_status != "ok").limit(limit)
         ).all()
     for b in books:
-        payload, status = LM.enrich_simple(b.author, b.title)
+        payload, status = LM.enrich_simple(b.author, b.title, lang=req.language)
         apply_enrichment_to_book(session, b, payload, status)
         (updated if status == "ok" else failed).append(b.id)  # type: ignore[arg-type]
     return {"updated": updated, "failed": failed}
@@ -1280,6 +1400,7 @@ class EnrichAllRequest(BaseModel):
     only_never: bool = Field(default=False, description="Procesar únicamente libros nunca enriquecidos (status 'none')")
     throttle_ms: int = Field(default=0, ge=0, description="Pausa entre llamadas para no saturar el LM")
     limit: Optional[int] = Field(default=None, description="Limitar número de libros a procesar")
+    language: Optional[str] = Field(default=None, description="Idioma preferido para el enriquecimiento")
 
 
 @app.post("/enrich/all")
@@ -1316,7 +1437,7 @@ def enrich_all(req: EnrichAllRequest, background: BackgroundTasks, session: Sess
                         ENRICH_PROGRESS["processed"] += 1
                         continue
                     ENRICH_PROGRESS["last_book_id"] = bid
-                    payload, status = LM.enrich_simple(b.author, b.title)
+                    payload, status = LM.enrich_simple(b.author, b.title, lang=req.language)
                     apply_enrichment_to_book(s, b, payload, status)
                     if status == "ok":
                         ENRICH_PROGRESS["updated"] += 1
@@ -1339,7 +1460,7 @@ def enrich_status() -> Dict[str, Any]:
 
 
 @app.post("/enrich/{book_id}")
-def enrich_one(book_id: int, session: Session = Depends(get_session)):
+def enrich_one(book_id: int, language: Optional[str] = Query(default=None), session: Session = Depends(get_session)):
     LOGGER.info("Enrich request for book ID: %d", book_id)
     book = session.get(Book, book_id)
     if not book:
@@ -1347,7 +1468,7 @@ def enrich_one(book_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Book not found")
     
     LOGGER.info("Enriching book: '%s' by %s", book.title, book.author)
-    payload, status = LM.enrich_simple(book.author, book.title)
+    payload, status = LM.enrich_simple(book.author, book.title, lang=language)
     book = apply_enrichment_to_book(session, book, payload, status)
     
     LOGGER.info("Enrich completed for book ID %d: status=%s", book_id, status)

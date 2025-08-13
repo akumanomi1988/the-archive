@@ -1,6 +1,4 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
   "title": "Book Metadata Enrichment Schema",
   "description": "Simplified metadata structure for book enrichment",
   "properties": {
@@ -10,9 +8,7 @@
     },
     "year": {
       "type": ["integer", "null"],
-      "description": "Publication year (original publication)",
-      "minimum": -3000,
-      "maximum": 2030
+      "description": "Publication year (original publication)"
     },
     "series": {
       "type": ["string", "null"],

@@ -3,9 +3,11 @@
   "db_path": "./skald.db",
   "lm_enabled": true,
   "lm_url": "http://127.0.0.1:1234/v1/chat/completions",
-  "lm_timeout": 15.0,
+  "lm_timeout": 300.0,
   "lm_mock": false,
   "lm_model": "openai/gpt-oss-20",
+  "lm_max_concurrency": 1,
+  "lm_min_interval_ms": 10000,
   "cors_origins": ["*"],
   "page_size_default": 20,
   "enrichment_batch_size": 10

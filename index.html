@@ -44,12 +44,19 @@
     }
 
     /* Base */
-    html, body { height: 100%; }
+    html, body { 
+      height: 100%; 
+      margin: 0; 
+      padding: 0; 
+      overflow-x: hidden; /* Solo prevenir scroll horizontal */
+    }
     body {
-      margin:0; background: var(--bg); color: var(--fg); font-family: var(--font-ui);
+      background: var(--bg); color: var(--fg); font-family: var(--font-ui);
       -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
       text-rendering: optimizeLegibility;
-      display:flex; flex-direction:column; min-height: 100svh; overflow: hidden; /* prevent page scroll */
+      display: flex; 
+      flex-direction: column; 
+      min-height: 100vh; /* Usar vh en lugar de svh para mejor compatibilidad */
     }
     .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-4); }
 
@@ -108,17 +115,69 @@
     }
 
     /* Main layout */
-  main { padding: var(--space-3) 0 env(safe-area-inset-bottom); flex: 1 1 auto; overflow: hidden; }
-  .grid { display:grid; grid-template-columns: 1.15fr 1fr; gap: var(--space-5); align-items:stretch; height: 100%; min-height: 0; }
-  .wrap.grid { height: 100%; min-height: 0; }
-  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+    main { 
+      padding: var(--space-3) 0 env(safe-area-inset-bottom); 
+      flex: 1 1 auto; 
+      overflow: hidden; 
+      min-height: 0; /* Importante para flexbox */
+    }
+    .grid { 
+      display: grid; 
+      grid-template-columns: 1.15fr 1fr; 
+      gap: var(--space-5); 
+      align-items: stretch; 
+      height: 100%; 
+      min-height: 0; 
+    }
+    .wrap.grid { 
+      height: 100%; 
+      min-height: 0; 
+      max-height: 100%; /* Prevenir overflow */
+    }
+    @media (max-width: 1100px) { 
+      .grid { 
+        grid-template-columns: 1fr; 
+        grid-template-rows: 1fr auto; /* En móvil, hacer el viewer más pequeño */
+      } 
+    }
 
     /* Panels */
     .panel {
-      background: var(--panel-solid); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
-      overflow:hidden; display:flex; flex-direction: column; min-height: 0; height: 100%;
+      background: var(--panel-solid); 
+      border: 1px solid var(--line); 
+      border-radius: var(--radius); 
+      box-shadow: var(--shadow-1);
+      overflow: hidden; 
+      display: flex; 
+      flex-direction: column; 
+      min-height: 0; 
+      height: 100%;
+      max-height: 100vh; /* Prevenir que crezca más que la ventana */
     }
-    .results { flex: 1 1 auto; overflow:auto; padding: .5rem; -webkit-overflow-scrolling: touch; }
+    .results { 
+      flex: 1 1 auto; 
+      overflow-y: auto; 
+      overflow-x: hidden;
+      padding: .5rem; 
+      -webkit-overflow-scrolling: touch;
+      /* Scroll suave en WebKit */
+      scrollbar-width: thin;
+      scrollbar-color: var(--line) transparent;
+    }
+    /* Mejorar scrollbars en WebKit */
+    .results::-webkit-scrollbar {
+      width: 8px;
+    }
+    .results::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .results::-webkit-scrollbar-thumb {
+      background-color: var(--line);
+      border-radius: 4px;
+    }
+    .results::-webkit-scrollbar-thumb:hover {
+      background-color: var(--muted);
+    }
     .viewer { min-height: 0; height: 100%; display:flex; flex-direction: column; }
   .viewer-head { padding: .6rem .8rem; border-bottom:1px solid var(--line); display:flex; flex-direction: column; gap:.5rem; }
   .viewer-head .spacer { flex:1 1 auto; }
@@ -151,7 +210,18 @@
       transition: all 0.2s ease;
       box-shadow: 0 2px 8px rgba(0,0,0,0.05);
       position: relative;
+      /* Prevenir problemas de layout */
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 100%;
     }
+
+    /* Contenedor del listado */
+    #list {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
     .book:hover { 
       background: color-mix(in oklab, var(--panel-solid) 95%, var(--accent) 5%); 
       transform: translateY(-2px); 
@@ -290,14 +360,18 @@
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); 
       gap: 1.5rem; 
       padding: 1rem;
+      width: 100%;
+      box-sizing: border-box;
     }
     .grid-view .book { 
       display: flex; 
       flex-direction: column; 
-      width: auto;
+      width: 100%;
       margin: 0;
       text-align: left;
       min-height: 200px;
+      max-width: 100%;
+      box-sizing: border-box;
     }
     .grid-view .book .cover { 
       width: 100%; 
@@ -386,7 +460,17 @@
       100% { transform: translateX(100%); }
     }
     .batch-mode .book-checkbox { position: absolute; top: .5rem; left: .5rem; z-index: 2; }
-    .batch-toolbar { display: none; padding: .5rem; background: var(--elev); border-bottom: 1px solid var(--line); gap: .5rem; align-items: center; }
+    .batch-toolbar { 
+      display: none; 
+      padding: .5rem; 
+      background: var(--elev); 
+      border-bottom: 1px solid var(--line); 
+      gap: .5rem; 
+      align-items: center;
+      flex-shrink: 0; /* No reducir la toolbar */
+      min-height: 48px; /* Altura consistente */
+      flex-wrap: wrap; /* Permitir wrap en pantallas pequeñas */
+    }
     .batch-mode .batch-toolbar { display: flex; }
     
     /* Group headers */
@@ -461,7 +545,16 @@
       font-size: 0.9rem;
     }
     .action.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
-    .footerbar { padding:.6rem .8rem; border-top:1px solid var(--line); display:flex; align-items:center; gap:.6rem; background: color-mix(in oklab, var(--panel-solid) 92%, transparent); }
+    .footerbar { 
+      padding: .6rem .8rem; 
+      border-top: 1px solid var(--line); 
+      display: flex; 
+      align-items: center; 
+      gap: .6rem; 
+      background: color-mix(in oklab, var(--panel-solid) 92%, transparent);
+      flex-shrink: 0; /* No reducir el footer */
+      min-height: 48px; /* Altura mínima consistente */
+    }
     .spacer { flex: 1 1 auto; }
     .status { padding:.35rem .6rem; background: var(--chip); color: var(--chip-fg); border:1px solid var(--line); border-radius: 999px; }
     .kbd{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; padding:.05rem .35rem; border-radius:6px; border:1px solid var(--kbd-br); background:var(--kbd-bg); color:var(--kbd-fg); font-size:.82em;}

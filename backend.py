@@ -27,6 +27,8 @@ import unicodedata
 import hashlib
 import zipfile
 from xml.etree import ElementTree as ET
+import mimetypes
+import posixpath
 
 import bleach
 import httpx
@@ -173,6 +175,11 @@ ENRICH_PROGRESS: Dict[str, Any] = {"running": False}
 LM_SEMAPHORE: Optional[threading.Semaphore] = None
 LM_LAST_REQUEST: float = 0.0
 LM_LOCK = threading.Lock()
+COVERS_DIR: Optional[Path] = None
+# External cover fetch throttling
+_COVER_FETCH_LOCK = threading.Lock()
+_COVER_LAST_REQUEST: float = 0.0
+_COVER_MIN_INTERVAL_MS: int = 400  # ~2.5 req/s globally
 
 
 @contextmanager
@@ -212,12 +219,16 @@ def init_app(config_path: Optional[str] = None) -> None:
 
     Safe to call multiple times in-process (used in tests).
     """
-    global CONFIG, DB_PATH, ENGINE, LM, LM_SEMAPHORE, LM_LAST_REQUEST
+    global CONFIG, DB_PATH, ENGINE, LM, LM_SEMAPHORE, LM_LAST_REQUEST, COVERS_DIR, _COVER_LAST_REQUEST
     CONFIG = load_config(config_path)
     DB_PATH = Path(CONFIG.db_path)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     ENGINE = create_engine(f"sqlite:///{DB_PATH.as_posix()}", echo=False)
     SQLModel.metadata.create_all(ENGINE)
+    # Covers directory next to DB
+    COVERS_DIR = DB_PATH.parent / "covers"
+    COVERS_DIR.mkdir(parents=True, exist_ok=True)
+    _COVER_LAST_REQUEST = 0.0
     # Init LM rate limiter
     max_concurrency = max(1, int(CONFIG.lm_max_concurrency))
     LM_SEMAPHORE = threading.Semaphore(max_concurrency)
@@ -463,6 +474,297 @@ def epub_to_light_html(epub_path: Path, max_chars: int = 200_000) -> str:
     except Exception as e3:
         LOGGER.error("Failed to render EPUB via zip fallback %s: %s", epub_path, e3)
         raise
+
+
+# ------------------------------------------------------------
+# Covers (extraction and fetch) 🖼️
+# ------------------------------------------------------------
+
+
+def _cover_cache_path_for_sha(sha256: str) -> Optional[Path]:
+    if not sha256:
+        return None
+    base = (COVERS_DIR or (Path.cwd() / "covers"))
+    # Check existing known extensions
+    for ext in (".jpg", ".jpeg", ".png", ".webp", ".svg"):
+        p = base / f"{sha256}{ext}"
+        if p.exists():
+            return p
+    # Negative cache marker
+    neg = base / f"{sha256}.none"
+    if neg.exists():
+        return None
+    # Default jpg path to write to
+    return base / f"{sha256}.jpg"
+
+
+def _thumb_cache_path_for_sha(sha256: str) -> Optional[Path]:
+    if not sha256:
+        return None
+    base = (COVERS_DIR or (Path.cwd() / "covers"))
+    for ext in (".jpg", ".jpeg", ".png", ".webp"):
+        p = base / f"{sha256}.thumb{ext}"
+        if p.exists():
+            return p
+    if (base / f"{sha256}.none").exists():
+        return None
+    return base / f"{sha256}.thumb.jpg"
+
+
+def _save_cover_bytes(sha256: str, data: bytes, suggested_ext: Optional[str] = None) -> Path:
+    base = (COVERS_DIR or (Path.cwd() / "covers"))
+    base.mkdir(parents=True, exist_ok=True)
+    ext = (suggested_ext or ".jpg").lower()
+    if not ext.startswith('.'):
+        ext = "." + ext
+    # Normalize common content types
+    if ext in (".jpeg", ".jpg", ".png", ".webp", ".svg"):
+        pass
+    else:
+        ext = ".jpg"
+    path = base / f"{sha256}{ext}"
+    path.write_bytes(data)
+    return path
+
+
+def _ensure_thumbnail(sha256: str, max_w: int = 200, max_h: int = 300) -> Optional[Path]:
+    try:
+        try:
+            from PIL import Image  # type: ignore
+        except Exception:
+            return None
+        full = _cover_cache_path_for_sha(sha256)
+        if not full or not full.exists():
+            return None
+        thumb_path = _thumb_cache_path_for_sha(sha256) or (COVERS_DIR or (Path.cwd() / "covers")) / f"{sha256}.thumb.jpg"
+        if thumb_path.exists():
+            return thumb_path
+        with Image.open(full.as_posix()) as im:
+            im = im.convert("RGB")
+            im.thumbnail((max_w, max_h))
+            thumb_path.parent.mkdir(parents=True, exist_ok=True)
+            im.save(thumb_path.as_posix(), format="JPEG", quality=82)
+        return thumb_path
+    except Exception as e:
+        LOGGER.warning("Thumbnail generation failed for %s: %s", sha256, e)
+        return None
+
+
+def _cache_headers_for(path: Path) -> Dict[str, str]:
+    try:
+        data = path.read_bytes()
+    except Exception:
+        data = b""
+    etag = hashlib.md5(data).hexdigest() if data else hashlib.md5(path.name.encode("utf-8", errors="ignore")).hexdigest()
+    return {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": f'W/"{etag}"',
+    }
+
+
+def _mark_cover_missing(sha256: str) -> None:
+    base = (COVERS_DIR or (Path.cwd() / "covers"))
+    base.mkdir(parents=True, exist_ok=True)
+    (base / f"{sha256}.none").write_text("", encoding="utf-8")
+
+
+def _guess_mime_from_path(p: Path) -> str:
+    mime, _ = mimetypes.guess_type(p.name)
+    return mime or "image/jpeg"
+
+
+def try_extract_cover_from_epub(epub_path: Path) -> Optional[Tuple[bytes, str]]:
+    """Try to extract a cover image from the EPUB file.
+
+    Returns (bytes, ext) or None.
+    """
+    try:
+        with zipfile.ZipFile(epub_path, 'r') as zf:
+            # 1) Read container.xml to find OPF
+            try:
+                container_xml = zf.read('META-INF/container.xml')
+                root = ET.fromstring(container_xml)
+                ns = {'c': 'urn:oasis:names:tc:opendocument:xmlns:container'}
+                rootfile_el = root.find('.//c:rootfile', ns)
+                opf_path = rootfile_el.attrib.get('full-path') if rootfile_el is not None else None
+            except Exception:
+                opf_path = None
+
+            manifest: Dict[str, Dict[str, str]] = {}
+            cover_href: Optional[str] = None
+            opf_dir = ""
+            if opf_path:
+                opf_dir = posixpath.dirname(opf_path)
+                try:
+                    opf_data = zf.read(opf_path)
+                    opf_root = ET.fromstring(opf_data)
+                    # Build manifest map id -> href, properties
+                    for it in opf_root.findall('.//{http://www.idpf.org/2007/opf}item'):
+                        iid = it.attrib.get('id')
+                        href = it.attrib.get('href')
+                        props = it.attrib.get('properties', '')
+                        if iid and href:
+                            manifest[iid] = {"href": href, "properties": props}
+                            if 'cover-image' in props:
+                                cover_href = href
+                    # meta name="cover" content="id"
+                    if not cover_href:
+                        for meta in opf_root.findall('.//{http://www.idpf.org/2007/opf}meta'):
+                            if meta.attrib.get('name') == 'cover':
+                                cover_id = meta.attrib.get('content')
+                                if cover_id and cover_id in manifest:
+                                    cover_href = manifest[cover_id]['href']
+                                    break
+                except Exception:
+                    pass
+
+            # If we found a cover href, resolve and read it
+            if cover_href:
+                cover_name = posixpath.normpath(posixpath.join(opf_dir, cover_href)) if opf_dir else cover_href
+                try:
+                    data = zf.read(cover_name)
+                    ext = Path(cover_name).suffix.lower().lstrip('.') or 'jpg'
+                    return data, ext
+                except Exception:
+                    pass
+
+            # Fallback: pick best-looking image by heuristic (name contains 'cover' or largest)
+            image_exts = ('.jpg', '.jpeg', '.png', '.webp')
+            image_names = [n for n in zf.namelist() if n.lower().endswith(image_exts)]
+            if not image_names:
+                return None
+            # Prefer names with 'cover'
+            cover_candidates = [n for n in image_names if 'cover' in n.lower()]
+            names_to_consider = cover_candidates or image_names
+            # Choose largest by size
+            sizes = {}
+            for n in names_to_consider:
+                try:
+                    info = zf.getinfo(n)
+                    sizes[n] = info.file_size
+                except Exception:
+                    sizes[n] = 0
+            best = max(names_to_consider, key=lambda n: sizes.get(n, 0))
+            try:
+                data = zf.read(best)
+                ext = Path(best).suffix.lower().lstrip('.') or 'jpg'
+                return data, ext
+            except Exception:
+                return None
+    except Exception:
+        return None
+
+
+def try_fetch_cover_via_openlibrary(author: str, title: str, timeout: float = 8.0) -> Optional[bytes]:
+    try:
+        global _COVER_LAST_REQUEST
+        # Basic global throttle
+        with _COVER_FETCH_LOCK:
+            import time as _t
+            now = _t.monotonic()
+            wait = max(0.0, (_COVER_MIN_INTERVAL_MS/1000.0) - (now - _COVER_LAST_REQUEST))
+            if wait > 0:
+                _t.sleep(wait)
+        params = {"q": f"title:{title} author:{author}", "fields": "cover_i,cover_edition_key,key", "limit": 1}
+        url = "https://openlibrary.org/search.json"
+        with httpx.Client(timeout=timeout) as client:
+            r = client.get(url, params=params)
+            r.raise_for_status()
+            data = r.json()
+            docs = data.get('docs') or []
+            if not docs:
+                return None
+            doc = docs[0]
+            cover_i = doc.get('cover_i')
+            if not cover_i:
+                # Fallback: use OL key (work/edition) if present
+                olid = (doc.get('cover_edition_key') or '').strip()
+                if olid:
+                    img_url = f"https://covers.openlibrary.org/b/olid/{olid}-L.jpg"
+                else:
+                    return None
+            else:
+                img_url = f"https://covers.openlibrary.org/b/id/{cover_i}-L.jpg"
+            # Throttle again before image
+            with _COVER_FETCH_LOCK:
+                now2 = _t.monotonic()
+                wait2 = max(0.0, (_COVER_MIN_INTERVAL_MS/1000.0) - (now2 - _COVER_LAST_REQUEST))
+                if wait2 > 0:
+                    _t.sleep(wait2)
+            ir = client.get(img_url)
+            with _COVER_FETCH_LOCK:
+                _COVER_LAST_REQUEST = _t.monotonic()
+            if ir.status_code == 200 and ir.headers.get('content-type','').startswith('image'):
+                return ir.content
+    except Exception:
+        return None
+    return None
+
+
+def try_fetch_cover_via_google(author: str, title: str, timeout: float = 8.0) -> Optional[bytes]:
+    try:
+        global _COVER_LAST_REQUEST
+        # Basic global throttle
+        with _COVER_FETCH_LOCK:
+            import time as _t
+            now = _t.monotonic()
+            wait = max(0.0, (_COVER_MIN_INTERVAL_MS/1000.0) - (now - _COVER_LAST_REQUEST))
+            if wait > 0:
+                _t.sleep(wait)
+        q = f"intitle:{title} inauthor:{author}"
+        url = "https://www.googleapis.com/books/v1/volumes"
+        with httpx.Client(timeout=timeout) as client:
+            r = client.get(url, params={"q": q, "maxResults": 1})
+            r.raise_for_status()
+            data = r.json()
+            items = data.get('items') or []
+            if not items:
+                return None
+            vi = (items[0].get('volumeInfo') or {})
+            links = vi.get('imageLinks') or {}
+            # Prefer largest link available
+            for k in ("extraLarge", "large", "medium", "small", "thumbnail", "smallThumbnail"):
+                u = links.get(k)
+                if u:
+                    # Throttle again before image
+                    with _COVER_FETCH_LOCK:
+                        now2 = _t.monotonic()
+                        wait2 = max(0.0, (_COVER_MIN_INTERVAL_MS/1000.0) - (now2 - _COVER_LAST_REQUEST))
+                        if wait2 > 0:
+                            _t.sleep(wait2)
+                    ir = client.get(u)
+                    with _COVER_FETCH_LOCK:
+                        _COVER_LAST_REQUEST = _t.monotonic()
+                    if ir.status_code == 200 and ir.headers.get('content-type','').startswith('image'):
+                        return ir.content
+    except Exception:
+        return None
+    return None
+
+
+def get_or_build_cover(book: "Book") -> Optional[Path]:
+    """Return a path to a cached cover image for this book, creating it if needed."""
+    cache_path = _cover_cache_path_for_sha(book.sha256)
+    if cache_path and cache_path.exists():
+        return cache_path
+
+    # Try extract from EPUB
+    data_ext = try_extract_cover_from_epub(Path(book.path))
+    if data_ext is not None:
+        data, ext = data_ext
+        return _save_cover_bytes(book.sha256, data, ext)
+
+    # Try OpenLibrary by author/title
+    data = try_fetch_cover_via_openlibrary(book.author, book.title, timeout=CONFIG.openlibrary_timeout)
+    if data:
+        return _save_cover_bytes(book.sha256, data, ".jpg")
+
+    # Try Google Books
+    data = try_fetch_cover_via_google(book.author, book.title, timeout=CONFIG.googlebooks_timeout)
+    if data:
+        return _save_cover_bytes(book.sha256, data, ".jpg")
+    _mark_cover_missing(book.sha256)
+    return None
 
 
 # ------------------------------------------------------------
@@ -1299,27 +1601,31 @@ def list_books(
             except (json.JSONDecodeError, TypeError):
                 pass
         
+        # Compute cover availability lazily without generating if heavy
+        # Use thumbnail endpoint by default for lists (smaller, cached aggressively)
+        cover_url = f"/books/{b.id}/cover/thumb"
         items.append(
-            {
-                "id": b.id,
-                "title": b.title,
-                "author": b.author,
-                "language": b.language,
-                "size_bytes": b.size_bytes,
-                "modified_iso": b.modified_iso,
-                "sha256": b.sha256,
-                "genre": b.genre,
-                "year": b.year,
-                "enrichment_status": b.enrichment_status,
-                "favorite": bool(st.favorite_flag) if st else False,
-                "read": bool(st.read_flag) if st else False,
-                "pending": bool(st.pending_flag) if st else False,
-                "progress_percent": round(progress_percent, 1),
-                "tags": tags,
-                "word_count": word_count,
-                "created_at": b.created_at.isoformat() if b.created_at else None,
-            }
-        )
+                {
+                    "id": b.id,
+                    "title": b.title,
+                    "author": b.author,
+                    "language": b.language,
+                    "size_bytes": b.size_bytes,
+                    "modified_iso": b.modified_iso,
+                    "sha256": b.sha256,
+                    "genre": b.genre,
+                    "year": b.year,
+                    "enrichment_status": b.enrichment_status,
+                    "favorite": bool(st.favorite_flag) if st else False,
+                    "read": bool(st.read_flag) if st else False,
+                    "pending": bool(st.pending_flag) if st else False,
+                    "progress_percent": round(progress_percent, 1),
+                    "tags": tags,
+                    "word_count": word_count,
+                    "created_at": b.created_at.isoformat() if b.created_at else None,
+                    "cover_url": cover_url,
+                }
+            )
     return PaginatedBooks(total=total, page=page, page_size=page_size, items=items)
 
 
@@ -1330,6 +1636,9 @@ def get_book(book_id: int, session: Session = Depends(get_session)) -> Dict[str,
         raise HTTPException(status_code=404, detail="Book not found")
     # attach state
     st = session.exec(select(BookState).where(BookState.book_id == book.id)).first()
+    # Add cover URLs
+    cover_url = f"/books/{book.id}/cover/thumb"
+    full_cover_url = f"/books/{book.id}/cover"
     return {
         "id": book.id,
         "title": book.title,
@@ -1348,7 +1657,54 @@ def get_book(book_id: int, session: Session = Depends(get_session)) -> Dict[str,
         "favorite": bool(st.favorite_flag) if st else False,
         "read": bool(st.read_flag) if st else False,
         "pending": bool(st.pending_flag) if st else False,
+    "cover_url": cover_url,
+    "full_cover_url": full_cover_url,
     }
+
+
+@app.get("/books/{book_id}/cover")
+def get_cover(book_id: int, session: Session = Depends(get_session)):
+    book = session.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    path = get_or_build_cover(book)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="Cover not available")
+    headers = _cache_headers_for(path)
+    return FileResponse(
+        path.as_posix(),
+        media_type=_guess_mime_from_path(path),
+        filename=f"{book.title}_cover{path.suffix}",
+        headers=headers,
+    )
+
+
+@app.get("/books/{book_id}/cover/thumb")
+def get_cover_thumb(book_id: int, session: Session = Depends(get_session)):
+    book = session.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    # Ensure we have a cover first
+    path = get_or_build_cover(book)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="Cover not available")
+    thumb = _ensure_thumbnail(book.sha256)
+    if not thumb or not thumb.exists():
+        # Fallback to full image
+        headers = _cache_headers_for(path)
+        return FileResponse(
+            path.as_posix(),
+            media_type=_guess_mime_from_path(path),
+            filename=f"{book.title}_cover{path.suffix}",
+            headers=headers,
+        )
+    headers = _cache_headers_for(thumb)
+    return FileResponse(
+        thumb.as_posix(),
+        media_type=_guess_mime_from_path(thumb),
+        filename=f"{book.title}_thumb{thumb.suffix}",
+        headers=headers,
+    )
 
 
 @app.get("/download/{book_id}")

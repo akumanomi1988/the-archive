@@ -10,3 +10,5 @@ lxml==5.2.2
 ebooklib==0.18
 pytest==8.3.2
 pytest-asyncio==0.23.8
+g4f
+Pillow==10.4.0

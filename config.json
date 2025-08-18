@@ -10,5 +10,14 @@
   "lm_min_interval_ms": 10000,
   "cors_origins": ["*"],
   "page_size_default": 20,
-  "enrichment_batch_size": 10
+  "enrichment_batch_size": 10,
+  "default_language": "es",
+  "providers_order": ["openlibrary", "googlebooks", "g4f", "lmstudio"],
+  "openlibrary_enabled": true,
+  "openlibrary_timeout": 8.0,
+  "googlebooks_enabled": true,
+  "googlebooks_timeout": 8.0,
+  "g4f_enabled": true,
+  "g4f_model": "gpt-4o-mini",
+  "g4f_timeout": 30.0
 }

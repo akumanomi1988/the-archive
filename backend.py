@@ -20,11 +20,13 @@ from datetime import datetime, timezone
 import time
 import random
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, cast
 import threading
 from contextlib import contextmanager
 import unicodedata
 import hashlib
+import zipfile
+from xml.etree import ElementTree as ET
 
 import bleach
 import httpx
@@ -39,6 +41,14 @@ from sqlalchemy import Column, String
 from sqlalchemy.dialects.sqlite import JSON as SQLITE_JSON
 from sqlmodel import Field as SQLField, Session, SQLModel, create_engine, select
 from sqlalchemy import Integer
+from enrichment import (
+    ChainEnricher,
+    EnrichmentResult,
+    OpenLibraryProvider,
+    GoogleBooksProvider,
+    G4FProvider,
+    LMStudioProvider,
+)
 
 
 # ------------------------------------------------------------
@@ -63,6 +73,18 @@ class AppConfig(BaseModel):
     # LM rate limiting - Máximo 1 libro siendo enriquecido simultáneamente para evitar timeouts
     lm_max_concurrency: int = 1
     lm_min_interval_ms: int = 10000  # Intervalo más largo entre peticiones
+
+    # Providers configuration
+    providers_order: List[str] = Field(default_factory=lambda: [
+        "openlibrary", "googlebooks", "g4f", "lmstudio"
+    ])
+    openlibrary_enabled: bool = True
+    openlibrary_timeout: float = 8.0
+    googlebooks_enabled: bool = True
+    googlebooks_timeout: float = 8.0
+    g4f_enabled: bool = False
+    g4f_model: Optional[str] = None
+    g4f_timeout: float = 30.0
 
     @field_validator("page_size_default", "enrichment_batch_size", "lm_max_concurrency", "lm_min_interval_ms")
     def _positive(cls, v: int):  # type: ignore[override]
@@ -213,6 +235,29 @@ def init_app(config_path: Optional[str] = None) -> None:
     LOGGER.info("LM client initialized: url=%s, timeout=%s, enabled=%s, mock=%s, model=%s", 
                CONFIG.lm_url, CONFIG.lm_timeout, CONFIG.lm_enabled, CONFIG.lm_mock, CONFIG.lm_model)
 
+    # Build enrichment chain
+    providers: List[Any] = []
+    # Construct instances lazily according to order and flags
+    for name in CONFIG.providers_order:
+        try:
+            if name == "openlibrary" and CONFIG.openlibrary_enabled:
+                providers.append(OpenLibraryProvider(timeout=CONFIG.openlibrary_timeout))
+            elif name == "googlebooks" and CONFIG.googlebooks_enabled:
+                providers.append(GoogleBooksProvider(timeout=CONFIG.googlebooks_timeout))
+            elif name == "g4f" and CONFIG.g4f_enabled:
+                providers.append(G4FProvider(model=CONFIG.g4f_model or "gpt-4o-mini", timeout=CONFIG.g4f_timeout))
+            elif name == "lmstudio" and CONFIG.lm_enabled:
+                providers.append(LMStudioProvider(base_url=CONFIG.lm_url, model=CONFIG.lm_model, timeout=CONFIG.lm_timeout))
+        except Exception as e:
+            LOGGER.warning("Failed to init provider %s: %s", name, e)
+    if not providers:
+        # Ensure we have at least the LMStudio provider if nothing else is enabled
+        if CONFIG.lm_enabled:
+            providers.append(LMStudioProvider(base_url=CONFIG.lm_url, model=CONFIG.lm_model, timeout=CONFIG.lm_timeout))
+    global ENRICH_CHAIN
+    ENRICH_CHAIN = ChainEnricher(providers)
+    LOGGER.info("Enrichment chain initialized with providers: %s", [getattr(p, 'name', str(p)) for p in providers])
+
 
 def get_session() -> Iterable[Session]:
     assert ENGINE is not None, "ENGINE not initialized; call init_app() first"
@@ -285,20 +330,42 @@ def derive_author_title_from_path(epub_path: Path) -> Tuple[Optional[str], Optio
 
 
 def parse_epub_metadata(epub_path: Path) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    # Primary path: use ebooklib
     try:
         book = epub.read_epub(epub_path.as_posix())
-        # title
         title_list = book.get_metadata("DC", "title")
         title = title_list[0][0] if title_list else None
-        # author
         creators = book.get_metadata("DC", "creator")
         author = creators[0][0] if creators else None
-        # language
         languages = book.get_metadata("DC", "language")
         language = languages[0][0] if languages else None
         return title, author, language
     except Exception as e:
-        LOGGER.warning("Failed to parse EPUB metadata for %s: %s", epub_path, e)
+        LOGGER.warning("ebooklib failed to parse EPUB metadata for %s: %s; trying XML fallback", epub_path, e)
+    # Fallback: read container.xml and OPF directly from ZIP
+    try:
+        with zipfile.ZipFile(epub_path, 'r') as zf:
+            container_xml = zf.read('META-INF/container.xml')
+            root = ET.fromstring(container_xml)
+            ns = {'c': 'urn:oasis:names:tc:opendocument:xmlns:container'}
+            rootfile_el = root.find('.//c:rootfile', ns)
+            if rootfile_el is None:
+                return None, None, None
+            opf_path = rootfile_el.attrib.get('full-path')
+            if not opf_path:
+                return None, None, None
+            opf_data = zf.read(opf_path)
+            opf_root = ET.fromstring(opf_data)
+            # Try to find DC elements regardless of metadata namespace wrapping
+            def _find_text(tag: str) -> Optional[str]:
+                el = opf_root.find(f'.//{{http://purl.org/dc/elements/1.1/}}{tag}')
+                return el.text.strip() if el is not None and el.text else None
+            title = _find_text('title')
+            author = _find_text('creator')
+            language = _find_text('language')
+            return title, author, language
+    except Exception as e2:
+        LOGGER.warning("ZIP/XML metadata fallback failed for %s: %s", epub_path, e2)
         return None, None, None
 
 
@@ -333,27 +400,68 @@ ALLOWED_ATTRS = {"a": ["href", "title"], "*": ["class", "id"]}
 
 
 def epub_to_light_html(epub_path: Path, max_chars: int = 200_000) -> str:
+    def sanitize_join(html_parts: List[str]) -> str:
+        combined = "\n".join(html_parts)
+        return bleach.clean(combined, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
+
+    # First try with ebooklib (fast path)
     try:
         book = epub.read_epub(epub_path.as_posix())
         parts: List[str] = []
         count = 0
         for item in book.get_items():
-            if item.get_type() == ITEM_DOCUMENT:
-                soup = BeautifulSoup(item.get_content(), "lxml")
-                # Remove scripts/styles
-                for tag in soup(["script", "style"]):
-                    tag.decompose()
-                body = soup.body or soup
-                text_html = str(body)
-                parts.append(text_html)
-                count += len(text_html)
-                if count >= max_chars:
-                    break
-        combined = "\n".join(parts)
-        sanitized = bleach.clean(combined, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
-        return sanitized
+            try:
+                if item.get_type() == ITEM_DOCUMENT:
+                    soup = BeautifulSoup(item.get_content(), "lxml")
+                    # Remove scripts/styles
+                    for tag in soup(["script", "style"]):
+                        tag.decompose()
+                    body = soup.body or soup
+                    text_html = str(body)
+                    parts.append(text_html)
+                    count += len(text_html)
+                    if count >= max_chars:
+                        break
+            except Exception as ie:
+                # Skip problematic items and continue
+                LOGGER.warning("Skipping EPUB item due to error: %s", ie)
+                continue
+        if parts:
+            return sanitize_join(parts)
     except Exception as e:
-        LOGGER.error("Failed to render EPUB %s: %s", epub_path, e)
+        LOGGER.warning("ebooklib failed to read EPUB %s, falling back to zip scan: %s", epub_path, e)
+
+    # Fallback: read HTML files directly from the ZIP, ignoring missing resources
+    try:
+        parts: List[str] = []
+        count = 0
+        with zipfile.ZipFile(epub_path, 'r') as zf:
+            # Collect HTML-like entries
+            names = [n for n in zf.namelist() if n.lower().endswith((".xhtml", ".html", ".htm"))]
+            for name in names:
+                try:
+                    data = zf.read(name)
+                    soup = BeautifulSoup(data, "lxml")
+                    for tag in soup(["script", "style"]):
+                        tag.decompose()
+                    body = soup.body or soup
+                    text_html = str(body)
+                    parts.append(text_html)
+                    count += len(text_html)
+                    if count >= max_chars:
+                        break
+                except KeyError as ke:
+                    # Missing file entries: skip
+                    LOGGER.warning("Missing file inside EPUB (%s): %s", name, ke)
+                except Exception as e2:
+                    LOGGER.warning("Skipping HTML entry due to error (%s): %s", name, e2)
+                    continue
+        if parts:
+            return sanitize_join(parts)
+        # As last resort, return minimal notice
+        return "<div><p>Unable to render EPUB content.</p></div>"
+    except Exception as e3:
+        LOGGER.error("Failed to render EPUB via zip fallback %s: %s", epub_path, e3)
         raise
 
 
@@ -978,6 +1086,7 @@ class LMClient:
 
 
 LM = LMClient(CONFIG.lm_url, timeout=CONFIG.lm_timeout, enabled=CONFIG.lm_enabled, mock=CONFIG.lm_mock)
+ENRICH_CHAIN: Optional[ChainEnricher] = None
 
 
 def apply_enrichment_to_book(session: Session, book: Book, payload: Optional[Dict[str, Any]], status: str) -> Book:
@@ -991,10 +1100,11 @@ def apply_enrichment_to_book(session: Session, book: Book, payload: Optional[Dic
         book.enrichment_status = status
         book.genre = payload.get("genre")
         # year could be None or not an int
-        year_val = None
-        if payload.get("year") is not None:
+        year_val: Optional[int] = None
+        y = payload.get("year")
+        if isinstance(y, (int, str)):
             try:
-                year_val = int(payload.get("year"))
+                year_val = int(y)
             except Exception:
                 year_val = None
         book.year = year_val
@@ -1042,13 +1152,31 @@ def root() -> Response:
 @app.get("/filters")
 def get_filters(session: Session = Depends(get_session)) -> Dict[str, Any]:
     # Authors
-    authors_rows = session.exec(select(Book.author).distinct().order_by(Book.author)).all()
-    authors: List[str] = [a for (a,) in authors_rows if isinstance(a, str)] if authors_rows and isinstance(authors_rows[0], tuple) else [a for a in authors_rows if isinstance(a, str)]
+    authors_rows = session.exec(select(Book.author).distinct().order_by(cast(Any, Book.author))).all()
+    authors: List[str] = []
+    for row in authors_rows:
+        if isinstance(row, tuple) and row and isinstance(row[0], str):
+            authors.append(row[0])
+        elif isinstance(row, str):
+            authors.append(row)
     # Genres (non-null)
-    genres_rows = session.exec(select(Book.genre).where(Book.genre.is_not(None)).distinct().order_by(Book.genre)).all()
-    genres: List[str] = [g for (g,) in genres_rows if isinstance(g, str)] if genres_rows and isinstance(genres_rows[0], tuple) else [g for g in genres_rows if isinstance(g, str)]
+    genres_rows = session.exec(select(Book.genre).where(cast(Any, Book.genre) != None).distinct().order_by(cast(Any, Book.genre))).all()  # noqa: E711
+    genres: List[str] = []
+    for row in genres_rows:
+        if isinstance(row, tuple) and row and isinstance(row[0], str):
+            genres.append(row[0])
+        elif isinstance(row, str):
+            genres.append(row)
     # Years
-    min_year = session.exec(select(Book.year).where(Book.year.is_not(None)).order_by(Book.year)).first()
+    year_rows = session.exec(select(Book.year).where(cast(Any, Book.year) != None)).all()  # noqa: E711
+    years: List[int] = []
+    for row in year_rows:
+        # row might be a tuple like (year,) or a bare int
+        if isinstance(row, tuple) and row and isinstance(row[0], int):
+            years.append(row[0])
+        elif isinstance(row, int):
+            years.append(row)
+    min_year: Optional[int] = min(years) if years else None
     current_year = datetime.now(timezone.utc).year
     return {
         "authors": authors,
@@ -1092,17 +1220,17 @@ def list_books(
     stmt = select(Book)
     if q:
         like = f"%{q}%"
-        stmt = stmt.where((Book.title.ilike(like)) | (Book.author.ilike(like)))
+        stmt = stmt.where((cast(Any, Book.title).ilike(like)) | (cast(Any, Book.author).ilike(like)))
     if autor:
-        stmt = stmt.where(Book.author.ilike(f"%{autor}%"))
+        stmt = stmt.where(cast(Any, Book.author).ilike(f"%{autor}%"))
     if titulo:
-        stmt = stmt.where(Book.title.ilike(f"%{titulo}%"))
+        stmt = stmt.where(cast(Any, Book.title).ilike(f"%{titulo}%"))
     if genre:
-        stmt = stmt.where(Book.genre.ilike(f"%{genre}%"))
+        stmt = stmt.where(cast(Any, Book.genre).ilike(f"%{genre}%"))
     if year_from is not None:
-        stmt = stmt.where((Book.year.is_not(None)) & (Book.year >= year_from))
+        stmt = stmt.where((cast(Any, Book.year) != None) & (cast(Any, Book.year) >= year_from))  # noqa: E711
     if year_to is not None:
-        stmt = stmt.where((Book.year.is_not(None)) & (Book.year <= year_to))
+        stmt = stmt.where((cast(Any, Book.year) != None) & (cast(Any, Book.year) <= year_to))  # noqa: E711
 
     # State filtering if provided
     if state_filter in {"favorite", "read", "pending"}:
@@ -1112,19 +1240,19 @@ def list_books(
             "pending": BookState.pending_flag,
         }[state_filter]
         sub = select(BookState.book_id).where(flag == True)  # noqa: E712
-        stmt = stmt.where(Book.id.in_(sub))
+        stmt = stmt.where(cast(Any, Book.id).in_(sub))
 
     # Apply sorting
     if sort_by == "author":
-        stmt = stmt.order_by(Book.author)
+        stmt = stmt.order_by(cast(Any, Book.author))
     elif sort_by == "year":
-        stmt = stmt.order_by(Book.year.desc().nulls_last())
+        stmt = stmt.order_by(cast(Any, Book.year).desc())
     elif sort_by == "added":
-        stmt = stmt.order_by(Book.created_at.desc())
+        stmt = stmt.order_by(cast(Any, Book.created_at).desc())
     elif sort_by == "genre":
-        stmt = stmt.order_by(Book.genre.nulls_last())
+        stmt = stmt.order_by(cast(Any, Book.genre))
     else:  # Default to title
-        stmt = stmt.order_by(Book.title)
+        stmt = stmt.order_by(cast(Any, Book.title))
 
     total = len(session.exec(stmt).all())
     # pagination
@@ -1136,14 +1264,9 @@ def list_books(
     # Map states for these ids
     state_map: Dict[int, BookState] = {}
     if ids:
-        st_rows = session.exec(select(BookState).where(BookState.book_id.in_(ids))).all()
+        st_rows = session.exec(select(BookState).where(cast(Any, BookState.book_id).in_(ids))).all()
         for st in st_rows:
-            if st and st.book_id:
-                state_map[st.book_id] = st
-    if ids:
-        st_rows = session.exec(select(BookState).where(BookState.book_id.in_(ids))).all()
-        for st in st_rows:
-            if st and st.book_id:
+            if st and st.book_id is not None:
                 state_map[st.book_id] = st
     items = []
     for b in rows:
@@ -1383,15 +1506,25 @@ def enrich_batch(req: EnrichBatchRequest, session: Session = Depends(get_session
     limit = CONFIG.enrichment_batch_size
     books: List[Book]
     if ids:
-        books = [b for b in session.exec(select(Book).where(Book.id.in_(ids))).all() if b is not None]
+        books_seq = session.exec(select(Book).where(cast(Any, Book.id).in_(ids))).all()
+        books = [b for b in books_seq if b is not None]
     else:
-        books = session.exec(
+        books_seq = session.exec(
             select(Book).where(Book.enrichment_status != "ok").limit(limit)
         ).all()
+        books = list(books_seq)
     for b in books:
-        payload, status = LM.enrich_simple(b.author, b.title, lang=req.language)
-        apply_enrichment_to_book(session, b, payload, status)
-        (updated if status == "ok" else failed).append(b.id)  # type: ignore[arg-type]
+        lang = req.language or CONFIG.default_language
+        result: EnrichmentResult
+        if ENRICH_CHAIN is None:
+            payload, status = LM.enrich_simple(b.author, b.title, lang=lang)
+            apply_enrichment_to_book(session, b, payload, status)
+            (updated if status == "ok" else failed).append(b.id)  # type: ignore[arg-type]
+        else:
+            result = ENRICH_CHAIN.enrich(b.author, b.title, lang)
+            status = "ok" if result.payload else "failed"
+            apply_enrichment_to_book(session, b, result.payload, status)
+            (updated if status == "ok" else failed).append(b.id)  # type: ignore[arg-type]
     return {"updated": updated, "failed": failed}
 
 
@@ -1417,6 +1550,8 @@ def enrich_all(req: EnrichAllRequest, background: BackgroundTasks, session: Sess
         stmt = stmt.limit(req.limit)
     # Precompute candidate ids to avoid holding ORM objects across threads
     ids = [b.id for b in session.exec(stmt).all() if b is not None]
+    # Remove None ids for task typing safety
+    ids = [cast(int, i) for i in ids if i is not None]
 
     def task(ids_: List[int], throttle_ms: int):
         ENRICH_PROGRESS.update({
@@ -1437,8 +1572,14 @@ def enrich_all(req: EnrichAllRequest, background: BackgroundTasks, session: Sess
                         ENRICH_PROGRESS["processed"] += 1
                         continue
                     ENRICH_PROGRESS["last_book_id"] = bid
-                    payload, status = LM.enrich_simple(b.author, b.title, lang=req.language)
-                    apply_enrichment_to_book(s, b, payload, status)
+                    lang = req.language or CONFIG.default_language
+                    if ENRICH_CHAIN is None:
+                        payload, status = LM.enrich_simple(b.author, b.title, lang=lang)
+                        apply_enrichment_to_book(s, b, payload, status)
+                    else:
+                        res = ENRICH_CHAIN.enrich(b.author, b.title, lang)
+                        status = "ok" if res.payload else "failed"
+                        apply_enrichment_to_book(s, b, res.payload, status)
                     if status == "ok":
                         ENRICH_PROGRESS["updated"] += 1
                     else:
@@ -1468,11 +1609,18 @@ def enrich_one(book_id: int, language: Optional[str] = Query(default=None), sess
         raise HTTPException(status_code=404, detail="Book not found")
     
     LOGGER.info("Enriching book: '%s' by %s", book.title, book.author)
-    payload, status = LM.enrich_simple(book.author, book.title, lang=language)
-    book = apply_enrichment_to_book(session, book, payload, status)
+    lang = language or CONFIG.default_language
+    if ENRICH_CHAIN is None:
+        payload, status = LM.enrich_simple(book.author, book.title, lang=lang)
+        book = apply_enrichment_to_book(session, book, payload, status)
+        LOGGER.info("Enrich completed for book ID %d using LM (fallback): status=%s", book_id, status)
+        return {"status": status, "enriched": payload}
+    res = ENRICH_CHAIN.enrich(book.author, book.title, lang)
+    status = "ok" if res.payload else "failed"
+    book = apply_enrichment_to_book(session, book, res.payload, status)
     
-    LOGGER.info("Enrich completed for book ID %d: status=%s", book_id, status)
-    return {"status": status, "enriched": payload}
+    LOGGER.info("Enrich completed for book ID %d via chain: status=%s (source=%s, error=%s)", book_id, status, res.source, res.error)
+    return {"status": status, "enriched": res.payload, "source": res.source, "error": res.error}
 
 
 # ------------------------------------------------------------

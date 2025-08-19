@@ -11,10 +11,10 @@ import backend
 @pytest_asyncio.fixture(scope="session")
 async def client(tmp_path_factory):
     # Use a temp DB and library for isolation
-    tmp_dir = tmp_path_factory.mktemp("skald")
+    tmp_dir = tmp_path_factory.mktemp("the_archive")
     cfg = {
         "library_path": str(tmp_dir / "library"),
-        "db_path": str(tmp_dir / "skald.db"),
+    "db_path": str(tmp_dir / "skald.db"),
         "lm_enabled": True,
         "lm_mock": True,
         "cors_origins": ["*"],

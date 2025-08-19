@@ -1,5 +1,5 @@
 """
-Skald — Minimal local system for indexing, searching, viewing, and downloading EPUB with optional local LLM enrichment (LMStudio).
+The Archive — Minimal local system for indexing, searching, viewing, and downloading EPUB with optional local LLM enrichment (LMStudio).
 
 Single-file backend with clear sections: config, models, db, indexer, LLM client, API.
 
@@ -29,6 +29,9 @@ import zipfile
 from xml.etree import ElementTree as ET
 import mimetypes
 import posixpath
+import tempfile
+import shutil
+import base64
 
 import bleach
 import httpx
@@ -121,7 +124,7 @@ def load_config(path_override: Optional[str | Path] = None) -> AppConfig:
     return AppConfig()
 
 
-LOGGER = logging.getLogger("skald")
+LOGGER = logging.getLogger("archive")
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
@@ -340,6 +343,76 @@ def derive_author_title_from_path(epub_path: Path) -> Tuple[Optional[str], Optio
         return None, None
 
 
+def _repair_epub_for_missing_resources(epub_path: Path) -> Optional[Path]:
+    """Create a repaired temporary copy of the EPUB where missing image/font entries referenced
+    from the OPF are replaced with tiny placeholder files so parsers like ebooklib don't fail.
+
+    Returns path to the temporary EPUB file or None if repair isn't needed/failed.
+    """
+    try:
+        with zipfile.ZipFile(epub_path, 'r') as zf:
+            names = set(zf.namelist())
+            # Try to read container and OPF
+            try:
+                container_xml = zf.read('META-INF/container.xml')
+                root = ET.fromstring(container_xml)
+                ns = {'c': 'urn:oasis:names:tc:opendocument:xmlns:container'}
+                rootfile_el = root.find('.//c:rootfile', ns)
+                opf_path = rootfile_el.attrib.get('full-path') if rootfile_el is not None else None
+            except Exception:
+                opf_path = None
+
+            missing: List[str] = []
+            if opf_path:
+                try:
+                    opf_data = zf.read(opf_path)
+                    opf_root = ET.fromstring(opf_data)
+                    opf_dir = posixpath.dirname(opf_path)
+                    # Inspect manifest for hrefs
+                    for it in opf_root.findall('.//{http://www.idpf.org/2007/opf}item'):
+                        href = it.attrib.get('href')
+                        if href:
+                            full = posixpath.normpath(posixpath.join(opf_dir, href)) if opf_dir else href
+                            if full not in names:
+                                missing.append(full)
+                except Exception:
+                    pass
+
+            # If nothing missing, return None (no repair needed)
+            if not missing:
+                return None
+
+            # Create temp dir and copy all entries, adding placeholders for missing files
+            tmpd = Path(tempfile.mkdtemp(prefix='skald_epub_repair_'))
+            tmp_epub = tmpd / (epub_path.stem + '.epub')
+            with zipfile.ZipFile(tmp_epub, 'w') as outz:
+                for n in names:
+                    try:
+                        data = zf.read(n)
+                        outz.writestr(n, data)
+                    except Exception:
+                        # skip problematic entries
+                        continue
+                # Add tiny placeholders for missing resources
+                for m in missing:
+                    # Determine extension
+                    ext = Path(m).suffix.lower()
+                    if ext in ('.jpg', '.jpeg', '.png'):
+                        # create a 1x1 transparent PNG base64
+                        png1x1 = base64.b64decode(
+                            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII='
+                        )
+                        outz.writestr(m, png1x1)
+                    elif ext in ('.ttf', '.otf'):
+                        # Create a minimal empty TTF placeholder (not a valid font but prevents missing-file errors)
+                        outz.writestr(m, b'')
+                    else:
+                        outz.writestr(m, b'')
+            return tmp_epub
+    except Exception:
+        return None
+
+
 def parse_epub_metadata(epub_path: Path) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     # Primary path: use ebooklib
     try:
@@ -352,7 +425,26 @@ def parse_epub_metadata(epub_path: Path) -> Tuple[Optional[str], Optional[str], 
         language = languages[0][0] if languages else None
         return title, author, language
     except Exception as e:
-        LOGGER.warning("ebooklib failed to parse EPUB metadata for %s: %s; trying XML fallback", epub_path, e)
+        LOGGER.warning("ebooklib failed to parse EPUB metadata for %s: %s; attempting repair and XML fallback", epub_path, e)
+        # Try a light repair: if the EPUB references missing font/image files, insert small placeholders
+        try:
+            repaired = _repair_epub_for_missing_resources(epub_path)
+            if repaired:
+                try:
+                    book = epub.read_epub(repaired.as_posix())
+                    title_list = book.get_metadata("DC", "title")
+                    title = title_list[0][0] if title_list else None
+                    creators = book.get_metadata("DC", "creator")
+                    author = creators[0][0] if creators else None
+                    languages = book.get_metadata("DC", "language")
+                    language = languages[0][0] if languages else None
+                    return title, author, language
+                except Exception:
+                    # If repair didn't help, continue to ZIP/XML fallback below
+                    pass
+        except Exception:
+            # Repair attempts should not raise; if they do, ignore and continue to fallback
+            pass
     # Fallback: read container.xml and OPF directly from ZIP
     try:
         with zipfile.ZipFile(epub_path, 'r') as zf:
@@ -440,7 +532,36 @@ def epub_to_light_html(epub_path: Path, max_chars: int = 200_000) -> str:
         if parts:
             return sanitize_join(parts)
     except Exception as e:
-        LOGGER.warning("ebooklib failed to read EPUB %s, falling back to zip scan: %s", epub_path, e)
+        LOGGER.warning("ebooklib failed to read EPUB %s: %s; attempting lightweight repair and falling back to zip scan", epub_path, e)
+        # Attempt repair copy with placeholders for missing resources and retry once
+        try:
+            repaired = _repair_epub_for_missing_resources(epub_path)
+            if repaired:
+                try:
+                    book = epub.read_epub(repaired.as_posix())
+                    parts = []
+                    count = 0
+                    for item in book.get_items():
+                        try:
+                            if item.get_type() == ITEM_DOCUMENT:
+                                soup = BeautifulSoup(item.get_content(), "lxml")
+                                for tag in soup(["script", "style"]):
+                                    tag.decompose()
+                                body = soup.body or soup
+                                text_html = str(body)
+                                parts.append(text_html)
+                                count += len(text_html)
+                                if count >= max_chars:
+                                    break
+                        except Exception as ie:
+                            LOGGER.warning("Skipping EPUB item due to error after repair: %s", ie)
+                            continue
+                    if parts:
+                        return sanitize_join(parts)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     # Fallback: read HTML files directly from the ZIP, ignoring missing resources
     try:
@@ -1425,7 +1546,7 @@ def apply_enrichment_to_book(session: Session, book: Book, payload: Optional[Dic
 # ------------------------------------------------------------
 
 
-app = FastAPI(title="Skald", version="0.1.0")
+app = FastAPI(title="The Archive", version="0.1.0")
 
 if CONFIG.cors_origins:
     app.add_middleware(
@@ -1448,7 +1569,7 @@ def root() -> Response:
     index_path = Path(__file__).parent / "index.html"
     if index_path.exists():
         return FileResponse(index_path.as_posix(), media_type="text/html; charset=utf-8")
-    return PlainTextResponse("Skald API running. Open /docs for API docs.")
+    return PlainTextResponse("The Archive API running. Open /docs for API docs.")
 
 
 @app.get("/filters")
@@ -1987,7 +2108,7 @@ def enrich_one(book_id: int, language: Optional[str] = Query(default=None), sess
 def _dev_main() -> None:
     import uvicorn
 
-    LOGGER.info("Skald starting with DB=%s, library=%s", DB_PATH, CONFIG.library_path)
+    LOGGER.info("The Archive starting with DB=%s, library=%s", DB_PATH, CONFIG.library_path)
     uvicorn.run("backend:app", host="0.0.0.0", port=8000, reload=False)
 
 

@@ -1,4 +1,4 @@
-Repository: Skald — EPUB indexer, viewer, and optional LLM enrichment (LMStudio)
+Repository: The Archive — EPUB indexer, viewer, and optional LLM enrichment (LMStudio)
 
 Purpose of this file
 - Give a new coding agent clear, high-value guidance to make safe, fast, and testable code changes in this repository.

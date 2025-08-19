@@ -1,24 +1,12 @@
-# Skald — Indexado, búsqueda y descarga de EPUB con enriquecimiento por LLM local (LMStudio)
+# The Archive — Indexado, búsqueda y descarga de EPUB con enriquecimiento por LLM local (LMStudio)
 
 Proyecto minimalista: un backend FastAPI (un solo archivo) + un `index.html` sencillo para buscar, ver y descargar EPUB. Los metadatos se guardan en SQLite con SQLModel. Enriquecimiento opcional vía un endpoint HTTP de LMStudio.
 
 ## Características
-- Indexa una carpeta de biblioteca: `biblioteca/Autor_con_guiones_bajos/Titulo_con_guiones_bajos.epub`.
-- Extrae: título, autor, idioma (si está), ruta, tamaño, fecha modificación ISO, sha256.
-- Idempotencia por sha256.
-- API REST para búsqueda/filtrado, detalle, visualización HTML ligera y descarga del EPUB.
-- Enriquecimiento opcional (mock o real) con LMStudio vía HTTP POST.
-- Frontend `index.html` con JS/CSS embebidos y Fetch API.
 
 ## Estructura mínima
-- `backend.py` — API y lógica (config, modelos, DB, indexador, LLM client, rutas).
-- `index.html` — UI mínima de búsqueda y visor.
-- `config.json.example` — ejemplo de configuración.
-- `requirements.txt`
-- `tests.py` — pruebas básicas con pytest y httpx.
 
 ## Requisitos
-- Python 3.11+
 
 ## Instalación
 1. Crear y activar un entorno virtual (opcional pero recomendado).
@@ -31,15 +19,6 @@ python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.
 ## Configuración
 Copiar `config.json.example` a `config.json` y ajustar rutas y opciones.
 
-- `library_path`: carpeta donde están los `.epub`.
-- `db_path`: ruta del archivo SQLite.
-- `lm_enabled`: `true` para activar el enriquecimiento.
-- `lm_url`: URL de LMStudio (por ejemplo `http://localhost:1234/api/predict`).
-- `lm_timeout`: segundos de timeout.
-- `lm_mock`: si `true`, responde con datos simulados.
-- `cors_origins`: orígenes permitidos para CORS.
-- `page_size_default`: tamaño de página por defecto.
-- `enrichment_batch_size`: tamaño del lote de enriquecimiento.
 
 También puedes definir `SKALD_CONFIG` con la ruta de configuración:
 
@@ -59,18 +38,8 @@ uvicorn backend:app --host 0.0.0.0 --port 8000
 ```
 
 Endpoints clave:
-- `GET http://localhost:8000/health`
-- `POST http://localhost:8000/reindex` (body `{ "mode": "sync" }`)
-- `GET http://localhost:8000/books?q=Asimov&autor=Isaac&page=1&page_size=20`
-- `GET http://localhost:8000/books/{id}`
-- `GET http://localhost:8000/open/{id}`
-- `GET http://localhost:8000/download/{id}`
-- `POST http://localhost:8000/enrich/{id}`
-- `POST http://localhost:8000/enrich/batch` (body `{ "ids": [1,2,3] }` opcional)
 
 ## Notas de seguridad
-- El contenido HTML renderizado desde EPUB se sanea con `bleach`, pero es recomendable usar bibliotecas confiables y no exponer el servicio a Internet sin endurecerlo.
-- No se almacena el texto del libro en la base de datos.
 
 ## EXAMPLES
 Ejemplos de uso con PowerShell/curl:
@@ -102,6 +71,23 @@ curl -s -X POST http://localhost:8000/enrich/batch -H "content-type: application
 
 ```powershell
 pytest -q
+```
+
+## Logo y favicons
+
+Coloca `biblioteca.svg` en la raíz del proyecto (ya está incluido). Hay un script helper `scripts/generate_icons.py` que intenta generar `favicon-256.png` y `favicon.ico` desde el SVG usando `cairosvg` + `Pillow`. En Windows es más sencillo exportar manualmente con Inkscape:
+
+```powershell
+# Con Inkscape instalado
+& 'C:\Program Files\Inkscape\inkscape.exe' -o favicon-256.png -w 256 -h 256 biblioteca.svg
+# Luego crea el .ico (por ejemplo con GIMP) o usa herramientas online.
+```
+
+Si prefieres usar el script Python, instala las dependencias nativas para Cairo (por ejemplo via MSYS2) y luego:
+
+```powershell
+python -m pip install cairosvg pillow
+python .\scripts\generate_icons.py
 ```
 
 ## Licencia

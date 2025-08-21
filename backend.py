@@ -41,6 +41,8 @@ from ebooklib import epub, ITEM_DOCUMENT
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import JSONResponse
+# staticfiles not required; explicit FileResponse routes are used for root assets
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Column, String
 from sqlalchemy.dialects.sqlite import JSON as SQLITE_JSON
@@ -893,7 +895,11 @@ def get_or_build_cover(book: "Book") -> Optional[Path]:
 # ------------------------------------------------------------
 
 
-def index_library(session: Session, library_path: Path) -> Dict[str, Any]:
+def index_library(_session: Optional[Session], library_path: Path) -> Dict[str, Any]:
+    """Index the library. Use an internal Session for writes so callers' sessions
+    (for example the request-scoped FastAPI session) aren't committed repeatedly
+    which can lead to prepared-state errors in some DB backends.
+    """
     added = 0
     skipped = 0
     updated = 0
@@ -902,60 +908,84 @@ def index_library(session: Session, library_path: Path) -> Dict[str, Any]:
     library_path = library_path.expanduser().resolve()
     library_path.mkdir(parents=True, exist_ok=True)
 
-    for epub_path in library_path.rglob("*.epub"):
+    BATCH_SIZE = 5000
+    batch_count = 0
+
+    # Use a fresh session bound to the global ENGINE for the indexing run
+    with Session(ENGINE) as s:  # type: ignore[arg-type]
+        for epub_path in library_path.rglob("*.epub"):
+            try:
+                sha = compute_sha256(epub_path)
+                existing = s.exec(select(Book).where(Book.sha256 == sha)).first()
+                stat = epub_path.stat()
+                size_bytes = stat.st_size
+                modified_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+                title, author, language = parse_epub_metadata(epub_path)
+                if not title or not author:
+                    d_author, d_title = derive_author_title_from_path(epub_path)
+                    author = author or d_author or "Unknown"
+                    title = title or d_title or epub_path.stem
+
+                if existing:
+                    # Update minimal fields if path or timestamps changed
+                    changed = False
+                    if (
+                        existing.path != epub_path.as_posix()
+                        or existing.size_bytes != size_bytes
+                        or existing.modified_iso != modified_iso
+                        or existing.title != title
+                        or existing.author != author
+                        or existing.language != language
+                    ):
+                        existing.path = epub_path.as_posix()
+                        existing.size_bytes = size_bytes
+                        existing.modified_iso = modified_iso
+                        existing.title = title
+                        existing.author = author
+                        existing.language = language
+                        existing.updated_at = datetime.now(timezone.utc)
+                        s.add(existing)
+                        updated += 1
+                        changed = True
+                    if not changed:
+                        skipped += 1
+                        continue
+                else:
+                    book = Book(
+                        title=title or epub_path.stem,
+                        author=author or "Unknown",
+                        language=language,
+                        path=epub_path.as_posix(),
+                        size_bytes=size_bytes,
+                        modified_iso=modified_iso,
+                        sha256=sha,
+                    )
+                    s.add(book)
+                    added += 1
+
+                batch_count += 1
+                if batch_count >= BATCH_SIZE:
+                    try:
+                        s.commit()
+                        s.expire_all()
+                        LOGGER.info("Committed %d indexed books so far (added=%d updated=%d)", added + updated, added, updated)
+                    except Exception:
+                        LOGGER.exception("Failed to commit batch during indexing")
+                    batch_count = 0
+
+            except Exception as e:
+                LOGGER.exception("Index error for %s: %s", epub_path, e)
+                errors.append(f"{epub_path}: {e}")
+
+        # final commit
         try:
-            sha = compute_sha256(epub_path)
-            existing = session.exec(select(Book).where(Book.sha256 == sha)).first()
-            stat = epub_path.stat()
-            size_bytes = stat.st_size
-            modified_iso = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
-            title, author, language = parse_epub_metadata(epub_path)
-            if not title or not author:
-                d_author, d_title = derive_author_title_from_path(epub_path)
-                author = author or d_author or "Unknown"
-                title = title or d_title or epub_path.stem
+            if batch_count > 0:
+                s.commit()
+                s.expire_all()
+                LOGGER.info("Final commit: added=%d updated=%d skipped=%d", added, updated, skipped)
+        except Exception:
+            LOGGER.exception("Failed to commit final batch during indexing")
 
-            if existing:
-                # Update minimal fields if path or timestamps changed
-                changed = False
-                if (
-                    existing.path != epub_path.as_posix()
-                    or existing.size_bytes != size_bytes
-                    or existing.modified_iso != modified_iso
-                    or existing.title != title
-                    or existing.author != author
-                    or existing.language != language
-                ):
-                    existing.path = epub_path.as_posix()
-                    existing.size_bytes = size_bytes
-                    existing.modified_iso = modified_iso
-                    existing.title = title
-                    existing.author = author
-                    existing.language = language
-                    existing.updated_at = datetime.now(timezone.utc)
-                    session.add(existing)
-                    updated += 1
-                    changed = True
-                if not changed:
-                    skipped += 1
-                continue
-
-            book = Book(
-                title=title or epub_path.stem,
-                author=author or "Unknown",
-                language=language,
-                path=epub_path.as_posix(),
-                size_bytes=size_bytes,
-                modified_iso=modified_iso,
-                sha256=sha,
-            )
-            session.add(book)
-            added += 1
-        except Exception as e:
-            LOGGER.exception("Index error for %s: %s", epub_path, e)
-            errors.append(f"{epub_path}: {e}")
-
-    session.commit()
     return {"added": added, "updated": updated, "skipped": skipped, "errors": errors}
 
 
@@ -1509,7 +1539,7 @@ class LMClient:
 
 
 LM = LMClient(CONFIG.lm_url, timeout=CONFIG.lm_timeout, enabled=CONFIG.lm_enabled, mock=CONFIG.lm_mock)
-ENRICH_CHAIN: Optional[ChainEnricher] = None
+ENRICH_CHAIN = None
 
 
 def apply_enrichment_to_book(session: Session, book: Book, payload: Optional[Dict[str, Any]], status: str) -> Book:
@@ -1556,6 +1586,104 @@ if CONFIG.cors_origins:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Serve a few static root assets (favicon and svg) directly from project root
+    _ROOT_DIR = Path(__file__).parent
+
+
+    @app.get("/favicon-256.png")
+    def favicon_png():
+        p = _ROOT_DIR / "favicon-256.png"
+        if p.exists():
+            return FileResponse(p.as_posix(), media_type="image/png")
+        raise HTTPException(status_code=404, detail="favicon not found")
+
+
+    @app.get("/favicon.ico")
+    def favicon_ico():
+        p = _ROOT_DIR / "favicon.ico"
+        if p.exists():
+            return FileResponse(p.as_posix(), media_type="image/x-icon")
+        raise HTTPException(status_code=404, detail="favicon not found")
+
+
+    @app.get("/biblioteca.svg")
+    def biblioteca_svg():
+        p = _ROOT_DIR / "biblioteca.svg"
+        if p.exists():
+            return FileResponse(p.as_posix(), media_type="image/svg+xml")
+        raise HTTPException(status_code=404, detail="svg not found")
+
+
+    def _get_local_ip() -> str:
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+
+    @app.get("/api/server-info")
+    def server_info() -> Dict[str, Any]:
+        # Return a best-effort local LAN IP (doesn't know the bound port)
+        return {"lan_ip": _get_local_ip(), "note": "binds to 0.0.0.0 when launched with run_app.py"}
+
+
+    def _get_config_path() -> Path:
+        # Determine where to persist config: SKALD_CONFIG or ./config.json in project root
+        p = os.environ.get("SKALD_CONFIG")
+        if p:
+            return Path(p)
+        return Path.cwd() / "config.json"
+
+
+    @app.get("/api/config")
+    def api_get_config() -> Dict[str, Any]:
+        # Return serializable dict
+        try:
+            return JSONResponse(content=CONFIG.model_dump())
+        except Exception:
+            # Fallback simple dict
+            return JSONResponse(content=json.loads(CONFIG.model_dump_json()))
+
+
+    @app.post("/api/config")
+    def api_set_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge user-supplied config, validate, persist to disk, and reload app.
+
+        Only keys present in AppConfig will be accepted. Returns the new full config.
+        """
+        # Accept only known fields
+        allowed = set(AppConfig.model_fields.keys())
+        filtered = {k: v for k, v in payload.items() if k in allowed}
+        if not filtered:
+            raise HTTPException(status_code=400, detail="No valid config fields provided")
+        # Merge into current config dict
+        base = json.loads(CONFIG.model_dump_json())
+        base.update(filtered)
+        try:
+            newcfg = AppConfig(**base)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid configuration: {e}")
+        # Persist to configured path
+        cfg_path = _get_config_path()
+        try:
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            with cfg_path.open("w", encoding="utf-8") as f:
+                json.dump(json.loads(newcfg.model_dump_json()), f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to write config: {e}")
+        # Reload app state
+        try:
+            init_app(str(cfg_path))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to reload app with new config: {e}")
+        return JSONResponse(content=newcfg.model_dump())
+
 
 
 @app.get("/health")
@@ -1960,13 +2088,12 @@ def reindex(req: ReindexRequest, background: BackgroundTasks, session: Session =
     lib_path = Path(CONFIG.library_path)
     if req.mode == "async":
         def task():
-            with Session(ENGINE) as s:
-                res = index_library(s, lib_path)
-                LOGGER.info("Async reindex result: %s", res)
+            res = index_library(None, lib_path)
+            LOGGER.info("Async reindex result: %s", res)
 
         background.add_task(task)
         return {"status": "started"}
-    res = index_library(session, lib_path)
+    res = index_library(None, lib_path)
     return res
 
 

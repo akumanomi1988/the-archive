@@ -141,6 +141,16 @@
         grid-template-rows: 1fr auto; /* En móvil, hacer el viewer más pequeño */
       } 
     }
+    /* Mobile improvements: keep results and reader separately scrollable and allow toggling */
+    @media (max-width: 768px) {
+      .wrap.grid { display:block; }
+      .panel { margin-bottom: .75rem; }
+      main { padding: .5rem 0; }
+      #results { max-height: 45vh; overflow-y:auto; }
+      .viewer { max-height: 50vh; overflow:auto; }
+      body.results-hidden #results { display: none; }
+      body.results-hidden .viewer { max-height: 100vh; }
+    }
 
     /* Panels */
     .panel {
@@ -185,14 +195,19 @@
   .controls-row { display:flex; align-items:center; gap:.6rem; flex-wrap: wrap; }
     .viewer-body { flex: 1 1 auto; min-height: 0; overflow:hidden; padding: .6rem; display:flex; }
     .reader {
-      width:100%; height: 100%; min-height: 0; border:1px solid var(--line); background: var(--panel-solid);
-      border-radius: 10px; flex: 1 1 auto; color: var(--fg);
+      width:100%; min-height: 0; border:1px solid var(--line); background: var(--panel-solid);
+      border-radius: 10px; color: var(--fg);
       font-size: var(--reader-font-size, 1rem);
       line-height: var(--reader-line-height, 1.6);
       font-family: var(--reader-family, serif);
       padding: var(--reader-padding, 1.25rem);
       overflow: auto; -webkit-overflow-scrolling: touch;
+      display: block;
     }
+    /* Legacy ebook compatibility: normalize images and iframes inside reader */
+    .reader img { max-width: 100%; height: auto; display:block; margin: .6rem 0; }
+    .reader iframe, .reader embed, .reader object { display:block; max-width:100%; }
+    .reader [style*="position:"] { position: static !important; }
   .reader.page-mode { scroll-behavior: smooth; scroll-snap-type: y mandatory; }
   .reader.page-mode * { scroll-snap-align: start; }
     /* Optional margins for readability */
@@ -593,7 +608,7 @@
 	</svg>
         <span id="lbl-app">The Archive</span>
       </div>
-      <div class="toolbar">
+  <div class="toolbar">
         <div class="seg" role="group" aria-label="Theme toggle">
           <button id="btn-theme-auto" aria-pressed="true" title="Auto" class="active">A</button>
           <button id="btn-theme-light" aria-pressed="false" title="Light">☀️</button>
@@ -608,7 +623,10 @@
             <option value="pt">PT</option>
           </select>
           <span class="chev">▾</span>
-        </div>
+  </div>
+  <button id="btnServerInfo" class="btn ghost" title="Server info">🔗</button>
+  <button id="btnToggleResults" class="btn ghost" title="Mostrar resultados">📚</button>
+  <button id="btnSettings" class="btn" title="Settings">⚙️</button>
       </div>
     </div>
 
@@ -679,6 +697,11 @@
       <span class="status" id="status">Listo.</span>
     </div>
   </header>
+  <div id="serverBanner" style="background:var(--panel);border-bottom:1px solid var(--line);padding:.5rem .75rem;display:flex;align-items:center;gap:.6rem;">
+    <div style="font-size:.95rem">Conectar a: <span id="serverUrl">http://localhost:8000</span></div>
+    <div class="spacer"></div>
+    <button id="openSettingsInline" class="btn">Editar configuración</button>
+  </div>
 
   <main>
     <div class="wrap grid">
@@ -1535,7 +1558,54 @@
   restoreProgressServer();
   updatePageInfo(true);
   }
-  function setReaderHTML(html){ const r = document.getElementById('reader'); if (!r) return; r.innerHTML = html; r.scrollTop = 0; updatePageInfo(); }
+  function sanitizeReaderHTML(html){
+    // Create a template to parse the HTML and sanitize DOM nodes
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html || '';
+    const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_ELEMENT, null, false);
+    const forbiddenStyles = ['position','z-index','transform','left','top','right','bottom'];
+    const removeTags = new Set(['IFRAME','EMBED','OBJECT','SCRIPT','STYLE']);
+    let node = walker.nextNode();
+    while(node){
+      // remove entirely forbidden tags
+      if(removeTags.has(node.tagName)){
+        const toRemove = node;
+        node = walker.nextNode();
+        toRemove.remove();
+        continue;
+      }
+      // strip dangerous inline styles
+      if(node.hasAttribute && node.hasAttribute('style')){
+        const style = node.getAttribute('style') || '';
+        const parts = style.split(';').map(s=>s.trim()).filter(Boolean);
+        const keep = [];
+        for(const p of parts){
+          const key = p.split(':')[0].trim().toLowerCase();
+          if(!forbiddenStyles.includes(key)) keep.push(p);
+        }
+        if(keep.length) node.setAttribute('style', keep.join('; ')); else node.removeAttribute('style');
+      }
+      // normalize images
+      if(node.tagName === 'IMG'){
+        node.style.maxWidth = '100%'; node.style.height = 'auto';
+      }
+      node = walker.nextNode();
+    }
+    return tpl.innerHTML;
+  }
+
+  function setReaderHTML(html){
+    const r = document.getElementById('reader'); if (!r) return;
+    try{
+      const simplified = localStorage.getItem('archive.reader.simplify') === '1';
+      const out = simplified ? sanitizeReaderHTML(html) : sanitizeReaderHTML(html); // future: different modes
+      r.innerHTML = out;
+    }catch(e){
+      // fallback: direct inject if sanitizer fails
+      r.innerHTML = html;
+    }
+    r.scrollTop = 0; updatePageInfo();
+  }
   function pageNext(){ const r = document.getElementById('reader'); if (!r) return; const delta = r.clientHeight; r.scrollBy({ top: delta, behavior: 'smooth' }); setTimeout(updatePageInfo, 200); }
   function pagePrev(){ const r = document.getElementById('reader'); if (!r) return; const delta = r.clientHeight; r.scrollBy({ top: -delta, behavior: 'smooth' }); setTimeout(updatePageInfo, 200); }
   function updatePageInfo(reset=false){
@@ -1695,6 +1765,44 @@ Etiquetas: ${tags}
 
   // Start the app
   document.addEventListener('DOMContentLoaded', init);
+  
+  // --- Server info and settings UI ---
+  async function loadServerInfo(){
+    try{
+      const s = await fetchJSON(api('/api/server-info'));
+      const url = s.lan_ip ? `http://${s.lan_ip}:8000` : window.location.origin;
+      document.getElementById('serverUrl').textContent = url;
+    }catch(e){ /* ignore */ }
+  }
+
+  document.getElementById('btnServerInfo').addEventListener('click', ()=>{ loadServerInfo(); alert('Server: '+document.getElementById('serverUrl').textContent); });
+  const _btnToggle = document.getElementById('btnToggleResults');
+  if(_btnToggle){
+    // initialize state from localStorage
+    if(localStorage.getItem('archive.results.hidden') === '1') document.body.classList.add('results-hidden');
+    _btnToggle.addEventListener('click', ()=>{
+      const hidden = document.body.classList.toggle('results-hidden');
+      localStorage.setItem('archive.results.hidden', hidden ? '1' : '0');
+    });
+  }
+  document.getElementById('openSettingsInline').addEventListener('click', ()=> document.getElementById('btnSettings').click());
+
+  document.getElementById('btnSettings').addEventListener('click', async ()=>{
+    // Simple prompt-based settings editor for small changes
+    try{
+      const cfg = await fetchJSON(api('/api/config'));
+      const jsonStr = JSON.stringify(cfg, null, 2);
+      const edited = prompt('Editar configuración (JSON):', jsonStr);
+      if (!edited) return;
+      let parsed;
+      try { parsed = JSON.parse(edited); } catch(e){ alert('JSON inválido'); return; }
+      await fetchJSON(api('/api/config'), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(parsed) });
+      alert('Configuración guardada. Reinicie la app si es necesario.');
+    }catch(e){ console.error(e); alert('No se pudo cargar la configuración'); }
+  });
+
+  // Load server info at startup
+  loadServerInfo();
   </script>
 </body>
 </html>

@@ -47,7 +47,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Column, String
 from sqlalchemy.dialects.sqlite import JSON as SQLITE_JSON
 from sqlmodel import Field as SQLField, Session, SQLModel, create_engine, select
-from sqlalchemy import Integer
+from sqlalchemy import Integer, func
 from enrichment import (
     ChainEnricher,
     EnrichmentResult,
@@ -174,6 +174,29 @@ class BookState(SQLModel, table=True):
     updated_at: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc), index=True)
 
 
+# Master tables for faster filtering and normalized data
+class Author(SQLModel, table=True):
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    name: str = SQLField(sa_column=Column(String, unique=True, index=True))
+
+
+class Genre(SQLModel, table=True):
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    name: str = SQLField(sa_column=Column(String, unique=True, index=True))
+
+
+class BookAuthor(SQLModel, table=True):
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    book_id: int = SQLField(sa_column=Column(Integer, index=True))
+    author_id: int = SQLField(sa_column=Column(Integer, index=True))
+
+
+class BookGenre(SQLModel, table=True):
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    book_id: int = SQLField(sa_column=Column(Integer, index=True))
+    genre_id: int = SQLField(sa_column=Column(Integer, index=True))
+
+
 DB_PATH: Path = Path(CONFIG.db_path)
 ENGINE = None  # type: ignore[assignment]
 ENRICH_PROGRESS: Dict[str, Any] = {"running": False}
@@ -273,6 +296,53 @@ def init_app(config_path: Optional[str] = None) -> None:
     global ENRICH_CHAIN
     ENRICH_CHAIN = ChainEnricher(providers)
     LOGGER.info("Enrichment chain initialized with providers: %s", [getattr(p, 'name', str(p)) for p in providers])
+
+
+def get_or_create_author_id(session: Session, author_name: Optional[str]) -> Optional[int]:
+    if not author_name:
+        return None
+    name = clean_text(author_name).strip()
+    if not name:
+        return None
+    existing = session.exec(select(Author).where(Author.name == name)).first()
+    if existing:
+        return existing.id
+    new = Author(name=name)
+    session.add(new)
+    session.commit()
+    session.refresh(new)
+    return new.id
+
+
+def get_or_create_genre_id(session: Session, genre_name: Optional[str]) -> Optional[int]:
+    if not genre_name:
+        return None
+    name = clean_text(genre_name).strip()
+    if not name:
+        return None
+    existing = session.exec(select(Genre).where(Genre.name == name)).first()
+    if existing:
+        return existing.id
+    new = Genre(name=name)
+    session.add(new)
+    session.commit()
+    session.refresh(new)
+    return new.id
+
+
+def _genre_name_from_book(book: Book) -> Optional[str]:
+    """Return a genre name for a Book, preferring explicit Book.genre then enrichment payload."""
+    if getattr(book, 'genre', None):
+        return clean_text(book.genre).strip()
+    try:
+        if book.enriched:
+            enriched = json.loads(book.enriched) if isinstance(book.enriched, str) else book.enriched
+            g = enriched.get('genre') if isinstance(enriched, dict) else None
+            if g:
+                return clean_text(g).strip()
+    except Exception:
+        pass
+    return None
 
 
 def get_session() -> Iterable[Session]:
@@ -963,6 +1033,33 @@ def index_library(_session: Optional[Session], library_path: Path) -> Dict[str, 
                     s.add(book)
                     added += 1
 
+                # After either creating or updating, ensure master tables reflect author/genre
+                # We commit here for simplicity for master table consistency
+                try:
+                    s.commit()
+                except Exception:
+                    s.rollback()
+                # Refresh to get book.id
+                s.refresh(existing if existing else book)
+                book_row = existing if existing else book
+                try:
+                    aid = get_or_create_author_id(s, book_row.author)
+                    if aid:
+                        # ensure BookAuthor exists
+                        existing_ba = s.exec(select(BookAuthor).where(BookAuthor.book_id == book_row.id)).first()
+                        if not existing_ba:
+                            s.add(BookAuthor(book_id=book_row.id, author_id=aid))
+                    # Determine genre name from book (prefer explicit book.genre then enriched payload)
+                    gname = _genre_name_from_book(book_row)
+                    gid = get_or_create_genre_id(s, gname)
+                    if gid:
+                        existing_bg = s.exec(select(BookGenre).where(BookGenre.book_id == book_row.id)).first()
+                        if not existing_bg:
+                            s.add(BookGenre(book_id=book_row.id, genre_id=gid))
+                    s.commit()
+                except Exception:
+                    s.rollback()
+
                 batch_count += 1
                 if batch_count >= BATCH_SIZE:
                     try:
@@ -1549,9 +1646,10 @@ def apply_enrichment_to_book(session: Session, book: Book, payload: Optional[Dic
     - On failure: keep previous enriched data; set status=failed.
     """
     if status == "ok" and payload:
+        # Persist enriched JSON and mirrored year only. Do NOT write genre into Book.genre;
+        # instead create/associate master Genre and BookGenre relation rows.
         book.enriched = payload
         book.enrichment_status = status
-        book.genre = payload.get("genre")
         # year could be None or not an int
         year_val: Optional[int] = None
         y = payload.get("year")
@@ -1561,6 +1659,18 @@ def apply_enrichment_to_book(session: Session, book: Book, payload: Optional[Dic
             except Exception:
                 year_val = None
         book.year = year_val
+        # Handle genre: store in Genre master table and BookGenre relation
+        genre_name = payload.get("genre")
+        try:
+            gid = get_or_create_genre_id(session, genre_name)
+            if gid:
+                # ensure BookGenre exists
+                exists_bg = session.exec(select(BookGenre).where(BookGenre.book_id == book.id, BookGenre.genre_id == gid)).first()
+                if not exists_bg:
+                    session.add(BookGenre(book_id=book.id, genre_id=gid))
+        except Exception:
+            # don't fail the whole enrichment for genre persistence problems
+            session.rollback()
     else:
         # Only update the status; preserve previous data
         book.enrichment_status = status
@@ -1702,22 +1812,12 @@ def root() -> Response:
 
 @app.get("/filters")
 def get_filters(session: Session = Depends(get_session)) -> Dict[str, Any]:
-    # Authors
-    authors_rows = session.exec(select(Book.author).distinct().order_by(cast(Any, Book.author))).all()
-    authors: List[str] = []
-    for row in authors_rows:
-        if isinstance(row, tuple) and row and isinstance(row[0], str):
-            authors.append(row[0])
-        elif isinstance(row, str):
-            authors.append(row)
-    # Genres (non-null)
-    genres_rows = session.exec(select(Book.genre).where(cast(Any, Book.genre) != None).distinct().order_by(cast(Any, Book.genre))).all()  # noqa: E711
-    genres: List[str] = []
-    for row in genres_rows:
-        if isinstance(row, tuple) and row and isinstance(row[0], str):
-            genres.append(row[0])
-        elif isinstance(row, str):
-            genres.append(row)
+    # Authors from master table
+    authors_rows = session.exec(select(Author.name).order_by(Author.name)).all()
+    authors = [r[0] if isinstance(r, tuple) else r for r in authors_rows]
+    # Genres from master table
+    genres_rows = session.exec(select(Genre.name).order_by(Genre.name)).all()
+    genres = [r[0] if isinstance(r, tuple) else r for r in genres_rows]
     # Years
     year_rows = session.exec(select(Book.year).where(cast(Any, Book.year) != None)).all()  # noqa: E711
     years: List[int] = []
@@ -1773,11 +1873,35 @@ def list_books(
         like = f"%{q}%"
         stmt = stmt.where((cast(Any, Book.title).ilike(like)) | (cast(Any, Book.author).ilike(like)))
     if autor:
-        stmt = stmt.where(cast(Any, Book.author).ilike(f"%{autor}%"))
+        # Try to match against Author master table for faster queries
+        sub_auth = select(Author.id).where(Author.name.ilike(f"%{autor}%"))
+        aid_rows = session.exec(sub_auth).all()
+        if aid_rows:
+            aids = [a[0] if isinstance(a, tuple) else a for a in aid_rows]
+            book_ids = session.exec(select(BookAuthor.book_id).where(cast(Any, BookAuthor.author_id).in_(aids))).all()
+            ids = [x[0] if isinstance(x, tuple) else x for x in book_ids]
+            if ids:
+                stmt = stmt.where(cast(Any, Book.id).in_(ids))
+            else:
+                stmt = stmt.where(Book.id == -1)
+        else:
+            # fallback to free-text on Book.author
+            stmt = stmt.where(cast(Any, Book.author).ilike(f"%{autor}%"))
     if titulo:
         stmt = stmt.where(cast(Any, Book.title).ilike(f"%{titulo}%"))
     if genre:
-        stmt = stmt.where(cast(Any, Book.genre).ilike(f"%{genre}%"))
+        # Try master genre table
+        gid_row = session.exec(select(Genre.id).where(Genre.name.ilike(f"%{genre}%"))).all()
+        if gid_row:
+            gids = [g[0] if isinstance(g, tuple) else g for g in gid_row]
+            book_ids = session.exec(select(BookGenre.book_id).where(cast(Any, BookGenre.genre_id).in_(gids))).all()
+            ids = [x[0] if isinstance(x, tuple) else x for x in book_ids]
+            if ids:
+                stmt = stmt.where(cast(Any, Book.id).in_(ids))
+            else:
+                stmt = stmt.where(Book.id == -1)
+        else:
+            stmt = stmt.where(cast(Any, Book.genre).ilike(f"%{genre}%"))
     if year_from is not None:
         stmt = stmt.where((cast(Any, Book.year) != None) & (cast(Any, Book.year) >= year_from))  # noqa: E711
     if year_to is not None:
@@ -1805,7 +1929,13 @@ def list_books(
     else:  # Default to title
         stmt = stmt.order_by(cast(Any, Book.title))
 
-    total = len(session.exec(stmt).all())
+    # Efficient count using SQL COUNT over the filtered stmt
+    try:
+        count_q = select(func.count()).select_from(stmt.subquery())
+        total = int(session.exec(count_q).scalar_one())
+    except Exception:
+        # Fallback: load and count
+        total = len(session.exec(stmt).all())
     # pagination
     offset = (page - 1) * page_size
     stmt = stmt.offset(offset).limit(page_size)
@@ -1839,7 +1969,7 @@ def list_books(
                 # This is also an estimate since we don't store scroll height
                 progress_percent = min(100, st.scroll_top / 1000 * 100) if st.scroll_top > 0 else 0
         
-        # Get enriched data for tags and word count
+    # Get enriched data for tags and word count
         tags = []
         word_count = None
         if b.enriched:
@@ -1850,6 +1980,19 @@ def list_books(
             except (json.JSONDecodeError, TypeError):
                 pass
         
+        # Load genres from relation table (may be multiple); fall back to b.genre if relation absent
+        genre_val = None
+        try:
+            gid_rows = session.exec(select(Genre.name).join(BookGenre, Genre.id == BookGenre.genre_id).where(BookGenre.book_id == b.id)).all()
+            if gid_rows:
+                # gid_rows may be list of tuples or strings
+                names = [r[0] if isinstance(r, tuple) else r for r in gid_rows]
+                genre_val = ", ".join(names)
+            else:
+                genre_val = b.genre
+        except Exception:
+            genre_val = b.genre
+
         # Compute cover availability lazily without generating if heavy
         # Use thumbnail endpoint by default for lists (smaller, cached aggressively)
         cover_url = f"/books/{b.id}/cover/thumb"
@@ -1862,7 +2005,7 @@ def list_books(
                     "size_bytes": b.size_bytes,
                     "modified_iso": b.modified_iso,
                     "sha256": b.sha256,
-                    "genre": b.genre,
+                    "genre": genre_val,
                     "year": b.year,
                     "enrichment_status": b.enrichment_status,
                     "favorite": bool(st.favorite_flag) if st else False,
@@ -1888,6 +2031,16 @@ def get_book(book_id: int, session: Session = Depends(get_session)) -> Dict[str,
     # Add cover URLs
     cover_url = f"/books/{book.id}/cover/thumb"
     full_cover_url = f"/books/{book.id}/cover"
+    # Load genres from relation table
+    try:
+        gid_rows = session.exec(select(Genre.name).join(BookGenre, Genre.id == BookGenre.genre_id).where(BookGenre.book_id == book.id)).all()
+        if gid_rows:
+            genres = [r[0] if isinstance(r, tuple) else r for r in gid_rows]
+        else:
+            genres = [book.genre] if book.genre else []
+    except Exception:
+        genres = [book.genre] if book.genre else []
+
     return {
         "id": book.id,
         "title": book.title,
@@ -1899,7 +2052,7 @@ def get_book(book_id: int, session: Session = Depends(get_session)) -> Dict[str,
         "sha256": book.sha256,
         "enriched": book.enriched,
         "enrichment_status": book.enrichment_status,
-        "genre": book.genre,
+        "genre": ", ".join(genres) if genres else None,
         "year": book.year,
         "created_at": book.created_at,
         "updated_at": book.updated_at,
@@ -1909,6 +2062,98 @@ def get_book(book_id: int, session: Session = Depends(get_session)) -> Dict[str,
     "cover_url": cover_url,
     "full_cover_url": full_cover_url,
     }
+
+
+@app.post('/migrate/backfill')
+def migrate_backfill(session: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Idempotent backfill: create Author/Genre rows and BookAuthor/BookGenre relations
+    based on existing Book table. Safe to run multiple times.
+    """
+    added_relations = 0
+    # Process all books
+    books = session.exec(select(Book)).all()
+    for b in books:
+        try:
+            aid = get_or_create_author_id(session, b.author)
+            if aid:
+                # ensure relation exists
+                exists = session.exec(select(BookAuthor).where(BookAuthor.book_id == b.id)).first()
+                if not exists:
+                    session.add(BookAuthor(book_id=b.id, author_id=aid))
+                    added_relations += 1
+        except Exception:
+            session.rollback()
+        try:
+            gid = get_or_create_genre_id(session, _genre_name_from_book(b))
+            if gid:
+                exists = session.exec(select(BookGenre).where(BookGenre.book_id == b.id)).first()
+                if not exists:
+                    session.add(BookGenre(book_id=b.id, genre_id=gid))
+                    added_relations += 1
+        except Exception:
+            session.rollback()
+    session.commit()
+    # Count authors/genres
+    def _scalar_count(stmt):
+        r = session.exec(stmt).one()
+        return int(r if isinstance(r, int) else (r[0] if isinstance(r, (list, tuple)) else r))
+
+    a_count = _scalar_count(select(func.count()).select_from(Author))
+    g_count = _scalar_count(select(func.count()).select_from(Genre))
+    return {"status": "ok", "authors": int(a_count), "genres": int(g_count), "new_relations": added_relations}
+
+
+@app.get('/authors')
+def search_authors(q: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=100), session: Session = Depends(get_session)) -> List[str]:
+    """Return matching author names from master table. If q is None or empty, return empty list to avoid huge payloads."""
+    if not q or not q.strip():
+        return []
+    qstr = f"%{q.strip()}%"
+    rows = session.exec(select(Author.name).where(Author.name.ilike(qstr)).order_by(Author.name).limit(limit)).all()
+    return [r[0] if isinstance(r, tuple) else r for r in rows]
+
+
+@app.post('/migrate/link-authors')
+def migrate_link_authors(mode: str = Query(default='strict', description='strict|substr'), session: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Bulk link books to authors using a single SQL insertion query.
+
+    mode=strict: matches where lower(trim(Book.author)) == lower(trim(Author.name))
+    mode=substr: matches where lower(Book.author) LIKE '%'||lower(Author.name)||'%' (may produce broader matches)
+    """
+    if mode not in {'strict', 'substr'}:
+        raise HTTPException(status_code=400, detail='mode must be strict or substr')
+    # Use raw SQL INSERT ... SELECT to avoid Python-side loops
+    con = ENGINE.connect()
+    try:
+        if mode == 'strict':
+            sql = '''
+            INSERT INTO BookAuthor (book_id, author_id)
+            SELECT b.id, a.id FROM Book b
+            JOIN Author a ON lower(trim(b.author)) = lower(trim(a.name))
+            WHERE b.id NOT IN (SELECT book_id FROM BookAuthor)
+            '''
+        else:
+            # substring mode
+            sql = '''
+            INSERT INTO BookAuthor (book_id, author_id)
+            SELECT b.id, a.id FROM Book b
+            JOIN Author a ON lower(b.author) LIKE '%' || lower(a.name) || '%'
+            WHERE b.id NOT IN (SELECT book_id FROM BookAuthor)
+            '''
+        con.execute(sql)
+        # SQLite returns rowcount as -1 sometimes; fall back to counting inserted rows
+        con.commit()
+        # Compute how many relations exist now using robust scalar extraction
+        def _scalar_count(stmt):
+            r = session.exec(stmt).one()
+            return int(r if isinstance(r, int) else (r[0] if isinstance(r, (list, tuple)) else r))
+        total = _scalar_count(select(func.count()).select_from(BookAuthor))
+        return {"status": "ok", "mode": mode, "relations_total": int(total)}
+    except Exception as e:
+        con.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        con.close()
 
 
 @app.get("/books/{book_id}/cover")

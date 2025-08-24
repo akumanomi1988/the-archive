@@ -92,20 +92,21 @@
       font: inherit; cursor: pointer; line-height: 1;
     }
     .seg button.active { background: var(--accent); color: var(--accent-fg); box-shadow: 0 1px 0 rgba(0,0,0,.1) inset; }
-    .seg select { appearance:none; padding-right: 1.8rem; position: relative; }
+  /* Prefer native select appearance for compatibility; preserve some padding for the chev */
+  .seg select { -webkit-appearance: menulist-button; appearance: auto; padding-right: 1.8rem; position: relative; z-index:1; touch-action: manipulation; }
     .seg .chev { margin-left:-1.4rem; pointer-events:none; opacity:.55; }
 
     /* Filters row */
     .filters {
       display:flex; gap:.5rem; flex-wrap: wrap; padding: .9rem 0 1rem;
-      align-items: center;
+      align-items: center; position: relative; z-index: 2; /* keep controls above results */
     }
     .pill {
       background: var(--elev); color: var(--fg); border:1px solid var(--line);
-      border-radius: 999px; padding:.6rem .9rem; outline: none; display:flex; align-items:center; gap:.5rem;
+      border-radius: 999px; padding:.6rem .9rem; outline: none; display:flex; align-items:center; gap:.5rem; overflow: visible;
     }
     .pill input { background: transparent; border:0; color: inherit; outline:none; min-width: 12ch; }
-  .pill select { background: transparent; border:0; color: inherit; outline:none; min-width: 12ch; font: inherit; }
+  .pill select { background: transparent; border:0; color: inherit; outline:none; min-width: 12ch; font: inherit; -webkit-appearance: menulist-button; appearance: auto; touch-action: manipulation; }
   .pill .lbl { font-size: .82rem; color: var(--muted); margin-right: .25rem; white-space: nowrap; }
     .pill input::placeholder { color: var(--muted); }
     .btn { border-radius: 999px; padding:.6rem 1rem; border:1px solid var(--line); background: var(--elev); color: var(--fg); cursor:pointer; }
@@ -637,7 +638,8 @@
       </label>
       <label class="pill">
         <span class="lbl" id="lbl-author">Autor</span>
-        <select id="autor" aria-label="Autor"><option value="">Autor</option></select>
+        <input id="autor_in" list="autor_list" aria-label="Autor" placeholder="Escribe 3+ letras...">
+        <datalist id="autor_list"></datalist>
       </label>
       <label class="pill"><span class="lbl" id="lbl-title">Título</span><input id="titulo" placeholder="Título" aria-label="Título"></label>
       <label class="pill">
@@ -779,7 +781,9 @@
       pt: { appName: "The Archive", searchPlaceholder: "Pesquisar... (título ou autor)", authorPlaceholder: "Autor", titlePlaceholder: "Título", genrePlaceholder: "Gênero", yearFromPlaceholder: "Ano de", yearToPlaceholder: "Ano até", search: "Buscar", reindex: "Reindexar", ready: "Pronto.", searching: "Buscando...", done: "Concluído.", error: "Erro", open: "Abrir", download: "Baixar", enrich: "Enriquecer", enrichAll: "Enriquecer tudo", enrichNew: "Enriquecer novos", enriching: "Enriquecendo...", enrichingAll: "Enriquecimento em lote...", enriched: "Enriquecido", started: "Iniciado", progress: "Progresso", pageInfo: "Página {page} / {pages} • {total} resultados", tip: "Dica:", tip2: "para buscar", reindexing: "Reindexando...", reindexed: "Reindex concluído." }
     };
     let LANG = 'es'; const LANG_KEY = 'skald.lang';
-    function t(key, params={}){ const d = I18N[LANG] || I18N.es; let s = (d[key] ?? I18N.es[key] ?? key); for (const [k,v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v); return s; }
+    function t(key, params){ params = params || {}; var d = I18N[LANG] || I18N.es; var s = (d[key] !== undefined) ? d[key] : (I18N.es[key] !== undefined ? I18N.es[key] : key); for (var k in params){ if (!Object.prototype.hasOwnProperty.call(params, k)) continue; var v = params[k]; // replace all occurrences without using replaceAll
+      s = s.split('{' + k + '}').join(v);
+    } return s; }
     function applyI18n(){
       document.documentElement.lang = LANG;
       document.getElementById('lbl-app').textContent = t('appName');
@@ -792,8 +796,11 @@
   document.getElementById('lbl-year-to').textContent = t('yearToPlaceholder');
   // placeholders for selects are first options
       document.getElementById('titulo').placeholder = t('titlePlaceholder');
-  document.querySelector('#autor option').textContent = t('authorPlaceholder');
-  document.querySelector('#genre option').textContent = t('genrePlaceholder');
+      // Guardar accesos que asumen existencia de un <select id="autor"> — en la UI moderna usamos input+datalist
+      const autorOpt = document.querySelector('#autor option');
+      if (autorOpt) autorOpt.textContent = t('authorPlaceholder');
+      const genreOpt = document.querySelector('#genre option');
+      if (genreOpt) genreOpt.textContent = t('genrePlaceholder');
       document.getElementById('btnSearch').textContent = t('search');
       document.getElementById('btnReindex').textContent = t('reindex');
   document.getElementById('btnEnrichAll').textContent = t('enrichAll');
@@ -895,7 +902,7 @@
     }
     function showNotes() {
       if (!currentBookId) return;
-      const note = prompt('Añadir nota:', notes[currentBookId]?.note || '');
+  const note = prompt('Añadir nota:', (notes && notes[currentBookId] && notes[currentBookId].note) ? notes[currentBookId].note : '');
       if (note !== null) {
         const r = document.getElementById('reader');
         const position = r ? r.scrollTop : 0;
@@ -931,8 +938,8 @@
 
     // Query builder
     function buildQuery() {
-      const q = document.querySelector('#q').value.trim();
-  const autor = document.querySelector('#autor').value.trim();
+  const q = document.querySelector('#q').value.trim();
+  const autor = (document.querySelector('#autor_in') || { value: '' }).value.trim();
       const titulo = document.querySelector('#titulo').value.trim();
       const genre = document.querySelector('#genre').value.trim();
   const year_from = document.querySelector('#year_from').value;
@@ -1028,8 +1035,8 @@
           if (b.favorite) stateIcons.push('<span class="state-icon" title="Favorito">★</span>');
           if (b.read) stateIcons.push('<span class="state-icon" title="Leído">✓</span>');
           if (b.pending) stateIcons.push('<span class="state-icon" title="Pendiente">⏳</span>');
-          if (bookmarks[b.id]?.length) stateIcons.push('<span class="state-icon" title="Con marcadores">🔖</span>');
-          if (notes[b.id]?.note) stateIcons.push('<span class="state-icon" title="Con notas">📝</span>');
+          if (bookmarks && bookmarks[b.id] && bookmarks[b.id].length) stateIcons.push('<span class="state-icon" title="Con marcadores">🔖</span>');
+          if (notes && notes[b.id] && notes[b.id].note) stateIcons.push('<span class="state-icon" title="Con notas">📝</span>');
           
           const enrichedTags = b.tags ? b.tags.slice(0,4).map(tag => `<span class="chip">${escapeHtml(tag)}</span>`).join('') : '';
           
@@ -1483,7 +1490,8 @@
       }
     });
     document.addEventListener('keydown', (e)=>{
-      if (['INPUT', 'SELECT'].includes(document.activeElement?.tagName)) {
+  var _active = (document.activeElement && document.activeElement.tagName) ? document.activeElement.tagName : null;
+  if (['INPUT', 'SELECT'].indexOf(_active) !== -1) {
         if (e.key === 'Enter') { e.preventDefault(); state.page = 1; const q = document.querySelector('#q').value.trim(); if (q) saveSearch(q); search(); }
         return;
       }
@@ -1507,10 +1515,23 @@
     (async () => {
       try {
         const filters = await fetchJSON(api('/filters'));
+        // Authors datalist / legacy select handling
         const selAutor = document.getElementById('autor');
-        selAutor.innerHTML = `<option value="">${t('authorPlaceholder')}</option>` + (filters.authors||[]).map(a=>`<option value="${a}">${a}</option>`).join('');
+        if (selAutor && Array.isArray(filters.authors)) {
+          selAutor.innerHTML = `<option value="">${t('authorPlaceholder')}</option>` + filters.authors.map(a=>`<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
+        } else {
+          // Preload the datalist with a small subset so users see suggestions immediately (max 50).
+          const autorList = document.getElementById('autor_list');
+          if (autorList && Array.isArray(filters.authors) && filters.authors.length) {
+            autorList.innerHTML = filters.authors.slice(0, 50).map(a=>`<option value="${escapeHtml(a)}"></option>`).join('');
+          }
+        }
+        // Populate genres from master `Genre` table returned by /filters
         const selGenre = document.getElementById('genre');
-        selGenre.innerHTML = `<option value="">${t('genrePlaceholder')}</option>` + (filters.genres||[]).map(g=>`<option value="${g}">${g}</option>`).join('');
+        if (selGenre) {
+          const genres = Array.isArray(filters.genres) ? filters.genres : [];
+          selGenre.innerHTML = `<option value="">${t('genrePlaceholder')}</option>` + genres.map(g=>`<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+        }
         const selFrom = document.getElementById('year_from');
         const selTo = document.getElementById('year_to');
         const minY = filters.min_year ?? '';
@@ -1524,6 +1545,26 @@
         selFrom.value = '';
         selTo.value = '';
       } catch(e) { /* ignore */ }
+      // Autor lookup: replace huge select with incremental search (3+ chars)
+      const autorIn = document.getElementById('autor_in');
+      const autorList = document.getElementById('autor_list');
+      function debounce(fn, wait){ let t; return function(...a){ clearTimeout(t); t = setTimeout(()=>fn.apply(this,a), wait); }; }
+      async function fetchAuthors(q){
+        const tq = String(q || '').trim();
+        if(!tq || tq.length < 3){ 
+          // show a lightweight hint so mobile users understand the requirement
+          if (autorList) autorList.innerHTML = `<option value="">${t('authorPlaceholder')} — escribe 3+ letras</option>`;
+          return; 
+        }
+        try{
+          const res = await fetchJSON(api(`/authors?q=${encodeURIComponent(tq)}&limit=50`));
+          autorList.innerHTML = (res||[]).map(a=>`<option value="${escapeHtml(a)}"></option>`).join('');
+        }catch(e){ autorList.innerHTML = ''; }
+      }
+      if(autorIn){ autorIn.addEventListener('input', debounce(e=>fetchAuthors(e.target.value), 300)); }
+      else {
+        console.warn('autor_in input not found; author incremental search disabled');
+      }
       // Always perform an initial search
       search();
       // Render history after initial load
@@ -1536,8 +1577,8 @@
   let lastDetailBase = '—';
   let currentBookId = null;
   // Server-side progress
-  async function getProgressServer(){ if (!currentBookId) return null; try { return await fetchJSON(api(`/books/${currentBookId}/progress`)); } catch { return null; } }
-  async function setProgressServer(payload){ if (!currentBookId) return; try { await fetchJSON(api(`/books/${currentBookId}/progress`), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) }); } catch {} }
+  async function getProgressServer(){ if (!currentBookId) return null; try { return await fetchJSON(api('/books/' + currentBookId + '/progress')); } catch (e) { return null; } }
+  async function setProgressServer(payload){ if (!currentBookId) return; try { await fetchJSON(api('/books/' + currentBookId + '/progress'), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) }); } catch (e) {} }
   function loadReaderPrefs(){ try { const s = JSON.parse(localStorage.getItem(READER_PREFS_KEY) || '{}'); readerPrefs = { ...readerPrefs, ...s }; } catch{} }
   function saveReaderPrefs(){ localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs)); }
   function applyReaderPrefs(){
@@ -1649,9 +1690,9 @@
   function toggleFullscreen(){
     const el = document.getElementById('viewerPanel');
     if (!document.fullscreenElement) {
-      el.requestFullscreen?.();
+      if (el.requestFullscreen) el.requestFullscreen(); else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
     } else {
-      document.exitFullscreen?.();
+      if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
     }
   }
   
@@ -1660,8 +1701,10 @@
     // Simple implementation - could be enhanced with a proper modal
     fetchJSON(api(`/books/${bookId}`)).then(book => {
       const enriched = book.enriched || {};
-      const premise = enriched.premise || (enriched.localized?.es?.premise) || 'Sin descripción disponible';
-      const tags = enriched.tags?.join(', ') || 'Sin etiquetas';
+  var premise = 'Sin descripción disponible';
+  try { if (enriched && enriched.premise) premise = enriched.premise; else if (enriched && enriched.localized && enriched.localized.es && enriched.localized.es.premise) premise = enriched.localized.es.premise; } catch(e){}
+  var tags = 'Sin etiquetas';
+  try { if (enriched && enriched.tags && enriched.tags.join) tags = enriched.tags.join(', '); } catch(e){}
       const info = `
 Título: ${book.title}
 Autor: ${book.author}

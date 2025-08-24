@@ -1,4 +1,3 @@
-
 {
   "library_path": "./library",
   "db_path": "./skald.db",
@@ -6,14 +5,21 @@
   "lm_url": "http://127.0.0.1:1234/v1/chat/completions",
   "lm_timeout": 300.0,
   "lm_mock": false,
-  "lm_model": "openai/gpt-oss-20",
-  "lm_max_concurrency": 1,
-  "lm_min_interval_ms": 10000,
-  "cors_origins": ["*"],
+  "cors_origins": [
+    "*"
+  ],
   "page_size_default": 20,
   "enrichment_batch_size": 10,
   "default_language": "es",
-  "providers_order": ["openlibrary", "googlebooks", "g4f", "lmstudio"],
+  "lm_model": "openai/gpt-oss-20",
+  "lm_max_concurrency": 1,
+  "lm_min_interval_ms": 10000,
+  "providers_order": [
+    "openlibrary",
+    "googlebooks",
+    "g4f",
+    "lmstudio"
+  ],
   "openlibrary_enabled": true,
   "openlibrary_timeout": 8.0,
   "googlebooks_enabled": true,

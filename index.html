@@ -143,15 +143,20 @@
       } 
     }
     /* Mobile improvements: keep results and reader separately scrollable and allow toggling */
-    @media (max-width: 768px) {
-      .wrap.grid { display:block; }
-      .panel { margin-bottom: .75rem; }
-      main { padding: .5rem 0; }
-      #results { max-height: 45vh; overflow-y:auto; }
-      .viewer { max-height: 50vh; overflow:auto; }
-      body.results-hidden #results { display: none; }
-      body.results-hidden .viewer { max-height: 100vh; }
-    }
+   @media (max-width: 768px) {
+    /* Stack panels on narrow viewports and keep both areas scrollable.
+      If the user toggles the results visibility, prefer hiding the
+      viewer on small screens so the list remains accessible. */
+    .wrap.grid { display:block; }
+    .panel { margin-bottom: .75rem; }
+    main { padding: .5rem 0; }
+    #results { max-height: 55vh; overflow-y:auto; }
+    .viewer { max-height: 55vh; overflow:auto; }
+    /* On narrow viewports, treat results-hidden as "hide viewer" so the
+      book list is still visible for users on small/ebook browsers. */
+    body.results-hidden .viewer { display: none; }
+    body.results-hidden #results { display: block; }
+   }
 
     /* Panels */
     .panel {
@@ -592,10 +597,46 @@
     @media (max-width: 600px) {
       .nav { padding: .6rem 0; }
       .filters { padding: .6rem 0 .8rem; gap: .4rem; }
+  .mobile-only { display: inline-flex; }
       .pill input { min-width: 10ch; }
       .grid { gap: var(--space-4); }
       .btn, .action { padding:.55rem .9rem; }
       .viewer-body { padding: .75rem; }
+    }
+    /* Extra compact mode for very small screens and simple browsers */
+    @media (max-width: 420px) {
+      .brand { font-size: .98rem; gap:.4rem; }
+      .logo { width: 22px; height:22px; }
+      .toolbar { gap:.35rem; }
+      /* hide non-essential segmented controls to save space */
+      .toolbar .seg:nth-child(n+2){ display:none; }
+      /* ensure search input takes available width */
+  .filters { align-items:stretch; }
+      .pill { flex:1 1 auto; min-width: 0; }
+      .pill input, .pill select { width:100%; }
+      /* Stack panels vertically and allow flexible scrolling areas so the
+         results list remains visible even when filters wrap on small screens */
+      .wrap.grid { display:flex; flex-direction:column; gap: var(--space-4); }
+      section.panel { width: 100%; }
+      .results { flex: 0 1 auto; min-height: 30vh; max-height: 55vh; overflow: auto; }
+      #list { display: block; }
+      .viewer { flex: 0 1 auto; min-height: 35vh; max-height: 65vh; overflow: auto; }
+      .viewer-body { overflow: auto; }
+  /* Mobile-only toggle button visibility */
+  .mobile-only { display:inline-flex; align-items:center; justify-content:center; margin-right:.5rem; }
+  .filters.collapsed { display: none !important; }
+  /* Filter toggle visuals */
+  .filter-toggle { gap:.4rem; padding:.45rem .6rem; border-radius:999px; align-items:center; }
+  .filter-toggle .filter-label{ font-size:.92rem; font-weight:600; }
+  .filter-toggle .filter-chev{ transition: transform .2s ease; display:inline-block; }
+  .filter-toggle[aria-expanded="true"] .filter-chev{ transform: rotate(180deg); }
+    }
+    /* Simple / E-ink readers: reduce heavy effects and shadows */
+    @media (forced-colors: active), (prefers-reduced-transparency: reduce) {
+      header, .panel, .pill, .btn, .action, .chip, .footerbar { box-shadow: none; background: var(--panel-solid); }
+      .nav, .filters { padding: .5rem; }
+      .logo { display:inline-block; }
+      .reader { -webkit-text-size-adjust: 100%; }
     }
   </style>
 </head>
@@ -627,10 +668,12 @@
   </div>
   <button id="btnServerInfo" class="btn ghost" title="Server info">🔗</button>
   <button id="btnToggleResults" class="btn ghost" title="Mostrar resultados">📚</button>
-  <button id="btnSettings" class="btn" title="Settings">⚙️</button>
+  <button id="btnToggleFilters" class="btn ghost mobile-only filter-toggle" title="Mostrar / ocultar filtros" aria-expanded="false">
+      <span class="filter-label">Filtros</span>
+      <span class="filter-chev">▾</span>
+  </button>
       </div>
     </div>
-
     <div class="wrap filters" role="search">
       <label class="pill" aria-label="Buscar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -898,18 +941,44 @@
       if (!bookmarks[currentBookId]) bookmarks[currentBookId] = [];
       bookmarks[currentBookId].push({ position, timestamp: Date.now(), page: readerPrefs.mode === 'paged' ? Math.floor(position / r.clientHeight) + 1 : null });
       saveBookmarks();
-      alert('Marcador añadido');
+      showMessage('Marcador añadido', 'success');
     }
     function showNotes() {
       if (!currentBookId) return;
-  const note = prompt('Añadir nota:', (notes && notes[currentBookId] && notes[currentBookId].note) ? notes[currentBookId].note : '');
-      if (note !== null) {
+  // Non-blocking notes editor: show a small modal to add/edit a note
+  openNoteModal(currentBookId);
+    }
+
+  function openNoteModal(bookId){
+    if (!bookId) return;
+    let m = document.getElementById('noteModal');
+    if (!m){
+      m = document.createElement('div'); m.id = 'noteModal'; m.className = 'modal';
+      m.innerHTML = `
+        <div class="modal-dialog">
+          <header><h3>Nota</h3><button id="noteClose" class="btn ghost">✕</button></header>
+          <div class="modal-body"><textarea id="noteText" style="width:100%;height:120px"></textarea>
+            <div style="display:flex;gap:.5rem;margin-top:.5rem"><button id="noteSave" class="btn primary">Guardar</button><button id="noteCancel" class="btn ghost">Cancelar</button></div>
+          </div>
+        </div>`;
+      document.body.appendChild(m);
+      document.getElementById('noteClose').addEventListener('click', ()=> m.remove());
+      document.getElementById('noteCancel').addEventListener('click', ()=> m.remove());
+      document.getElementById('noteSave').addEventListener('click', ()=>{
+        const val = document.getElementById('noteText').value || '';
         const r = document.getElementById('reader');
         const position = r ? r.scrollTop : 0;
-        notes[currentBookId] = { note, position, timestamp: Date.now() };
+        notes[bookId] = { note: val, position, timestamp: Date.now() };
         saveNotes();
-      }
+        showMessage('Nota guardada', 'success');
+        m.remove();
+      });
     }
+    // populate
+    document.getElementById('noteText').value = notes[bookId] && notes[bookId].note ? notes[bookId].note : '';
+    // show
+    // ensure modal exists in DOM; if recreated above it's already appended
+  }
     
     // Auto night mode
     function checkAutoNightMode() {
@@ -1423,6 +1492,30 @@
 
     // Events
     document.getElementById('btnSearch').addEventListener('click', () => { state.page = 1; const q = document.querySelector('#q').value.trim(); if (q) saveSearch(q); search(); });
+    // Mobile filters toggle: collapse/expand the filters row to reveal results on small screens
+    const filtersEl = document.querySelector('.wrap.filters');
+    const btnToggleFilters = document.getElementById('btnToggleFilters');
+    const FILTERS_KEY = 'archive.filters.collapsed';
+    function applyFiltersCollapsed(collapsed){
+      if (!filtersEl) return;
+      filtersEl.classList.toggle('collapsed', !!collapsed);
+      if (btnToggleFilters) {
+        btnToggleFilters.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      }
+    }
+    if (btnToggleFilters){
+      btnToggleFilters.addEventListener('click', ()=>{
+        const cur = localStorage.getItem(FILTERS_KEY) === '1';
+        const next = !cur;
+        localStorage.setItem(FILTERS_KEY, next ? '1' : '0');
+        applyFiltersCollapsed(next);
+        // if filters hidden, ensure results are shown (use results-hidden semantics inverted on small screens)
+        if (next && document.body.classList.contains('results-hidden')) document.body.classList.remove('results-hidden');
+      });
+      // apply saved state on load
+      const saved = localStorage.getItem(FILTERS_KEY) === '1';
+      applyFiltersCollapsed(saved);
+    }
     document.getElementById('prev').addEventListener('click', () => { if (state.page>1){ state.page--; search(); }});
     document.getElementById('next').addEventListener('click', () => { const max = Math.ceil(state.total/state.page_size); if (state.page<max){ state.page++; search(); }});
     document.getElementById('btnReindex').addEventListener('click', async () => {
@@ -1717,10 +1810,111 @@ Descripción: ${premise}
 
 Etiquetas: ${tags}
       `.trim();
-      alert(info); // Simple alert - could be replaced with a proper modal
-    }).catch(() => alert('Error al cargar información del libro'));
+  showMessage(info, 'info'); // show book info in toast instead of alert
+  }).catch(() => showMessage('Error al cargar información del libro', 'error'));
   }
   
+  // -------- Settings modal (friendly UI) --------
+  async function openSettingsModal(){
+    // Create modal shell if missing
+    let modal = document.getElementById('settingsModal');
+    if (!modal){
+      modal = document.createElement('div'); modal.id = 'settingsModal'; modal.className = 'modal';
+      modal.innerHTML = `
+        <div class="modal-dialog">
+          <header>
+            <h3>Configuración</h3>
+            <button id="settingsClose" class="btn ghost">✕</button>
+          </header>
+          <div class="modal-body">
+            <form id="settingsForm">
+              <label>Ruta biblioteca <input name="library_path" /></label>
+              <label>Base de datos <input name="db_path" /></label>
+              <label>LM enabled <input type="checkbox" name="lm_enabled" /></label>
+              <label>LM URL <input name="lm_url" /></label>
+              <label>LM timeout <input type="number" name="lm_timeout" step="1" /></label>
+              <div class="provider-toggles"></div>
+              <hr />
+              <div style="display:flex;gap:.5rem;align-items:center;">
+                <button type="button" id="saveSettings" class="btn primary">Guardar</button>
+                <button type="button" id="toggleRawJson" class="btn">Mostrar JSON</button>
+                <button type="button" id="resetDefaults" class="btn ghost">Reset</button>
+                <div class="spacer"></div>
+              </div>
+              <pre id="settingsRaw" style="display:none;max-height:300px;overflow:auto;background:var(--panel);padding:.5rem;border:1px solid var(--line);"></pre>
+            </form>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      // Styles for modal (minimal)
+      const css = document.createElement('style'); css.textContent = `
+        /* Modal: simplified for e-readers and small screens */
+        .modal{position:fixed;inset:0;background:rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;z-index:9999}
+        .modal-dialog{width:720px;max-width:95%;background:var(--bg);border:1px solid var(--line);padding:1rem;border-radius:.5rem}
+        .modal-dialog header{display:flex;align-items:center}
+        .modal-dialog header h3{margin:0;flex:1}
+        .modal-dialog label{display:block;margin:.5rem 0}
+        @media (max-width:600px){
+          .modal{align-items:flex-end;background:rgba(0,0,0,.08);} /* less intrusive */
+          .modal-dialog{border-radius:12px 12px 0 0;width:100%;max-width:100%;padding:.75rem;}
+          .modal-dialog label{font-size:.95rem}
+        }
+        @media (forced-colors: active), (prefers-reduced-transparency: reduce){
+          .modal{background:transparent}
+          .modal-dialog{border:1px solid CanvasText}
+        }
+      `; document.head.appendChild(css);
+      document.getElementById('settingsClose').addEventListener('click', ()=> modal.remove());
+      document.getElementById('toggleRawJson').addEventListener('click', ()=>{
+        const raw = document.getElementById('settingsRaw'); raw.style.display = raw.style.display==='none' ? 'block' : 'none';
+      });
+      document.getElementById('saveSettings').addEventListener('click', saveSettings);
+      document.getElementById('resetDefaults').addEventListener('click', async ()=>{
+        // reload remote config
+        await loadAndPopulateConfig(true);
+      });
+    }
+    await loadAndPopulateConfig();
+  }
+
+  async function loadAndPopulateConfig(reset=false){
+    try{
+      const res = await fetchJSON(api('/api/config'));
+      const form = document.getElementById('settingsForm');
+      if (!form) return;
+      // basic fields
+      form.library_path.value = res.library_path || '';
+      form.db_path.value = res.db_path || '';
+      form.lm_enabled.checked = !!res.lm_enabled;
+      form.lm_url.value = res.lm_url || '';
+      form.lm_timeout.value = res.lm_timeout || '';
+      // provider toggles
+      const prov = ['openlibrary','googlebooks','g4f','lmstudio'];
+      const container = document.querySelector('#settingsForm .provider-toggles');
+      container.innerHTML = prov.map(p=>`<label><input type="checkbox" name="prov_${p}" ${res[`${p}_enabled`] ? 'checked':''}/> ${p}</label>`).join('');
+      const raw = document.getElementById('settingsRaw'); raw.textContent = JSON.stringify(res, null, 2);
+  }catch(e){ showMessage('Error cargando config: '+((e && e.message) ? e.message : String(e)), 'error'); }
+  }
+
+  async function saveSettings(){
+    const form = document.getElementById('settingsForm');
+    if (!form) return;
+    const payload = {};
+    payload.library_path = form.library_path.value;
+    payload.db_path = form.db_path.value;
+    payload.lm_enabled = !!form.lm_enabled.checked;
+    payload.lm_url = form.lm_url.value;
+    payload.lm_timeout = Number(form.lm_timeout.value) || undefined;
+    // providers
+    const prov = ['openlibrary','googlebooks','g4f','lmstudio'];
+    prov.forEach(p=>{ payload[`${p}_enabled`] = !!form.querySelector(`[name=prov_${p}]`)?.checked; });
+    try{
+      const res = await fetchJSON(api('/api/config'), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) });
+  showMessage('Configuración guardada. Recargando...', 'success');
+  setTimeout(()=> location.reload(), 800);
+  }catch(e){ showMessage('Error guardando: '+((e && e.message) ? e.message : String(e)), 'error'); }
+  }
   // History breadcrumbs
   function renderHistory() {
     const header = document.querySelector('.wrap.nav');
@@ -1763,6 +1957,11 @@ Etiquetas: ${tags}
   
   loadReaderPrefs(); applyReaderPrefs();
   loadHistory(); loadSearchHistory();
+
+  // Settings modal wiring
+  document.getElementById('openSettingsInline').addEventListener('click', async ()=>{
+    await openSettingsModal();
+  });
 
   // ---------- State toggles (favorite/read/pending) ----------
   async function updateStateToggles(detail){
@@ -1818,7 +2017,7 @@ Etiquetas: ${tags}
     }catch(e){ /* ignore */ }
   }
 
-  document.getElementById('btnServerInfo').addEventListener('click', ()=>{ loadServerInfo(); alert('Server: '+document.getElementById('serverUrl').textContent); });
+  document.getElementById('btnServerInfo').addEventListener('click', ()=>{ loadServerInfo(); showMessage('Server: '+document.getElementById('serverUrl').textContent); });
   const _btnToggle = document.getElementById('btnToggleResults');
   if(_btnToggle){
     // initialize state from localStorage
@@ -1828,21 +2027,9 @@ Etiquetas: ${tags}
       localStorage.setItem('archive.results.hidden', hidden ? '1' : '0');
     });
   }
-  document.getElementById('openSettingsInline').addEventListener('click', ()=> document.getElementById('btnSettings').click());
+  document.getElementById('openSettingsInline').addEventListener('click', async ()=>{ await openSettingsModal(); });
 
-  document.getElementById('btnSettings').addEventListener('click', async ()=>{
-    // Simple prompt-based settings editor for small changes
-    try{
-      const cfg = await fetchJSON(api('/api/config'));
-      const jsonStr = JSON.stringify(cfg, null, 2);
-      const edited = prompt('Editar configuración (JSON):', jsonStr);
-      if (!edited) return;
-      let parsed;
-      try { parsed = JSON.parse(edited); } catch(e){ alert('JSON inválido'); return; }
-      await fetchJSON(api('/api/config'), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(parsed) });
-      alert('Configuración guardada. Reinicie la app si es necesario.');
-    }catch(e){ console.error(e); alert('No se pudo cargar la configuración'); }
-  });
+  // legacy settings button removed — use the inline editor/modal instead
 
   // Load server info at startup
   loadServerInfo();

@@ -2216,6 +2216,93 @@ def download_book(book_id: int, session: Session = Depends(get_session)):
     )
 
 
+@app.get("/ebook")
+def serve_ebook_page() -> Response:
+    """Serve the lightweight ebook page located in ./frontend/ebook.html"""
+    p = Path(__file__).parent / "frontend" / "ebook.html"
+    if p.exists():
+        return FileResponse(p.as_posix(), media_type="text/html; charset=utf-8")
+    raise HTTPException(status_code=404, detail="ebook page not found")
+
+
+@app.get('/frontend/{rest_of_path:path}')
+def serve_frontend_asset(rest_of_path: str):
+    """Serve files placed in the ./frontend directory (css/js/html) for the lightweight pages.
+
+    This keeps the main app static-free while allowing the lightweight ebook UI to load its assets
+    via /frontend/... URLs.
+    """
+    p = Path(__file__).parent / 'frontend' / rest_of_path
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail='Not found')
+    # Let FileResponse guess content-type
+    return FileResponse(p.as_posix())
+
+
+@app.get("/ebook/search")
+def ebook_search(
+    titulo: Optional[str] = Query(default=None),
+    autor: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    session: Session = Depends(get_session),
+):
+    """Lightweight search API for very old browsers / e-readers.
+
+    Rules:
+    - If titulo or autor provided, each must be >= 3 chars. If neither provided, return empty result.
+    - Uses simple LIKE queries on Book.title and Book.author and returns small items array with id, title, author.
+    """
+    LOGGER.info("/ebook/search called: titulo=%s autor=%s page=%s page_size=%s", titulo, autor, page, page_size)
+    if not titulo and not autor:
+        return JSONResponse({"total": 0, "page": page, "page_size": page_size, "items": []})
+    if titulo and len(titulo.strip()) < 3:
+        raise HTTPException(status_code=400, detail="titulo must be at least 3 characters")
+    if autor and len(autor.strip()) < 3:
+        raise HTTPException(status_code=400, detail="autor must be at least 3 characters")
+
+    stmt = select(Book)
+    if titulo:
+        stmt = stmt.where(cast(Any, Book.title).ilike(f"%{titulo.strip()}%"))
+    if autor:
+        stmt = stmt.where(cast(Any, Book.author).ilike(f"%{autor.strip()}%"))
+    # simple ordering
+    stmt = stmt.order_by(cast(Any, Book.title))
+    # count
+    try:
+        count_q = select(func.count()).select_from(stmt.subquery())
+        total = int(session.exec(count_q).scalar_one())
+    except Exception:
+        total = len(session.exec(stmt).all())
+    offset = (page - 1) * page_size
+    rows = session.exec(stmt.offset(offset).limit(page_size)).all()
+    items = []
+    for b in rows:
+        if not b:
+            continue
+        items.append({"id": b.id, "title": b.title, "author": b.author})
+    return JSONResponse({"total": total, "page": page, "page_size": page_size, "items": items})
+
+
+@app.get("/ebook/download/{book_id}")
+def ebook_download(book_id: int, session: Session = Depends(get_session)):
+    """Proxy download endpoint for the lightweight ebook page.
+
+    Reuses the same file-serving logic as /download/{book_id} but exposes a stable /ebook/download path.
+    """
+    book = session.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    file_path = Path(book.path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    return FileResponse(
+        file_path.as_posix(),
+        media_type="application/epub+zip",
+        filename=f"{book.title}.epub",
+    )
+
+
 @app.get("/open/{book_id}")
 def open_book(book_id: int, session: Session = Depends(get_session)):
     book = session.get(Book, book_id)

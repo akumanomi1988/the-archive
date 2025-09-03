@@ -20,18 +20,25 @@ $icon = ''  # e.g., 'favicon.ico'
 $pyiArgs = @('--noconfirm', "--name=$distName")
 if ($OneFile) { $pyiArgs += '--onefile' } else { $pyiArgs += '--onedir' }
 if ($icon) { $pyiArgs += "--icon=$icon" }
+# Añade estas exclusiones antes de los hidden-imports
+$pyiArgs += '--exclude-module'; $pyiArgs += 'test'
+$pyiArgs += '--exclude-module'; $pyiArgs += 'unittest'
+$pyiArgs += '--exclude-module'; $pyiArgs += 'setuptools'
+$pyiArgs += '--exclude-module'; $pyiArgs += 'distutils'
 
-# Módulos ocultos
-$pyiArgs += '--hidden-import'; $pyiArgs += 'backend'
+# Luego incluye explícitamente los módulos necesarios
+$pyiArgs += '--hidden-import'; $pyiArgs += 'certifi'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'charset_normalizer'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'sqlmodel'
 $pyiArgs += '--hidden-import'; $pyiArgs += 'fastapi'
 $pyiArgs += '--hidden-import'; $pyiArgs += 'uvicorn'
-$pyiArgs += '--hidden-import'; $pyiArgs += 'starlette'
-$pyiArgs += '--hidden-import'; $pyiArgs += 'pydantic'
-$pyiArgs += '--hidden-import'; $pyiArgs += 'sqlalchemy'
-$pyiArgs += '--hidden-import'; $pyiArgs += 'anyio'
-$pyiArgs += '--hidden-import'; $pyiArgs += 'websockets'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'httpx'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'ebooklib'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'bs4'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'bleach'
+$pyiArgs += '--additional-hooks-dir'; $pyiArgs += '.'
 
-# Datos
+# Datos adicionales
 $datas = @(
     "index.html;.",
     "biblioteca.svg;.",

@@ -1,31 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
-block_cipher = None
-
-
 a = Analysis(
     ['run_app.py'],
     pathex=[],
     binaries=[],
     datas=[('index.html', '.'), ('biblioteca.svg', '.'), ('favicon-256.png', '.'), ('favicon.ico', '.'), ('config.json', '.'), ('enrichment_model.json', '.'), ('skald.db', '.'), ('covers', 'covers'), ('frontend', 'frontend'), ('library', 'library'), ('backend.py', '.')],
-    hiddenimports=['backend'],
-    hookspath=[],
+    hiddenimports=['certifi', 'charset_normalizer', 'sqlmodel', 'fastapi', 'uvicorn', 'httpx', 'ebooklib', 'bs4', 'bleach'],
+    hookspath=['.'],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
+    excludes=['test', 'unittest', 'setuptools', 'distutils'],
     noarchive=False,
+    optimize=0,
 )
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
-    a.zipfiles,
     a.datas,
     [],
     name='the-archive',

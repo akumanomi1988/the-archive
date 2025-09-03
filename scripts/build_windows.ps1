@@ -1,6 +1,3 @@
-# Build script to create a Windows executable using PyInstaller
-# Usage: Open PowerShell, activate the virtualenv, then run: .\scripts\build_windows.ps1
-
 param(
     [int]$Port = 8000,
     [switch]$OneFile
@@ -10,21 +7,31 @@ $ErrorActionPreference = 'Stop'
 
 Write-Host "Using Python: $(Get-Command python).Path"
 
-# Ensure pyinstaller is installed in the venv
-Write-Host "Installing PyInstaller into virtualenv..."
+# Instalar PyInstaller
+Write-Host "Installing PyInstaller..."
 python -m pip install --upgrade pip
 python -m pip install pyinstaller
 
-# Build args
+# Argumentos
 $entry = 'run_app.py'
 $distName = 'the-archive'
-$icon = '' # set path to .ico if you want, e.g. 'favicon.ico'
+$icon = ''  # e.g., 'favicon.ico'
 
 $pyiArgs = @('--noconfirm', "--name=$distName")
 if ($OneFile) { $pyiArgs += '--onefile' } else { $pyiArgs += '--onedir' }
 if ($icon) { $pyiArgs += "--icon=$icon" }
-# Ensure these data files are included (templates, static files, DB, covers, assets)
-# Use relative paths from project root
+
+# Módulos ocultos
+$pyiArgs += '--hidden-import'; $pyiArgs += 'backend'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'fastapi'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'uvicorn'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'starlette'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'pydantic'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'sqlalchemy'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'anyio'
+$pyiArgs += '--hidden-import'; $pyiArgs += 'websockets'
+
+# Datos
 $datas = @(
     "index.html;.",
     "biblioteca.svg;.",
@@ -34,7 +41,9 @@ $datas = @(
     "enrichment_model.json;.",
     "skald.db;.",
     "covers;covers",
-    "library;library"
+    "frontend;frontend",
+    "library;library",
+    "backend.py;."
 )
 foreach ($d in $datas) { $pyiArgs += "--add-data"; $pyiArgs += $d }
 
@@ -44,4 +53,4 @@ $pyiArgs += $entry
 Write-Host "Running PyInstaller with args: $pyiArgs"
 pyinstaller @pyiArgs
 
-Write-Host "Build finished. See dist\$distName (or dist\$distName.exe if --onefile)."
+Write-Host "Build finished. See dist\$distName.exe"

@@ -4,7 +4,21 @@
   function el(id){return document.getElementById(id);} 
   function setMsg(s){ el('msg').textContent = s; }
   function clearResults(){ el('results').innerHTML = ''; }
-  function showResults(items){ clearResults(); if(!items || !items.length) { setMsg('No se encontraron resultados'); return; } setMsg(''); for(var i=0;i<items.length;i++){ var it = items[i]; var li = document.createElement('li'); li.innerHTML = '<strong>'+escapeHtml(it.title)+'</strong>\n<div style="color:#6b7280;margin:.35rem 0">'+escapeHtml(it.author || '')+'</div>\n<a class="download" href="'+(apiBase + '/ebook/download/' + encodeURIComponent(it.id))+'">Descargar</a>'; el('results').appendChild(li); } }
+  function showResults(items){
+    clearResults();
+    if(!items || !items.length) { setMsg('No se encontraron resultados'); return; }
+    setMsg('');
+    for(var i=0;i<items.length;i++){
+      var it = items[i];
+      var li = document.createElement('li');
+  var downloadUrl = apiBase + '/ebook/download/' + encodeURIComponent(it.id); // interstitial HTML page -> then to .epub
+      // For very simple browsers (e-readers) avoid target/_blank and download attributes.
+      li.innerHTML = '<strong>'+escapeHtml(it.title)+'</strong>\n'
+        + '<div style="color:#6b7280;margin:.35rem 0">'+escapeHtml(it.author || '')+'</div>\n'
+        + '<a class="download" href="'+downloadUrl+'">Descargar</a>';
+      el('results').appendChild(li);
+    }
+  }
   function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]; }); }
   function xhrGet(url, cb){ var r = new XMLHttpRequest(); r.open('GET', url, true); r.onreadystatechange = function(){ if(r.readyState===4){ if(r.status>=200 && r.status<300){ try{ var data = JSON.parse(r.responseText); cb(null,data); } catch(e){ cb(new Error('JSON parse error')); } } else { cb(new Error('HTTP '+r.status)); } } }; r.send(null); }
   function buildQuery(){ var titulo = el('titulo').value.trim(); var autor = el('autor').value.trim(); var q = []; if(titulo) q.push('titulo='+encodeURIComponent(titulo)); if(autor) q.push('autor='+encodeURIComponent(autor)); q.push('page=1'); q.push('page_size=50'); return q.join('&'); }

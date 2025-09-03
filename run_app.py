@@ -11,6 +11,20 @@ from pathlib import Path
 import sys
 
 from uvicorn import Config, Server
+# Ensure backend module is imported so PyInstaller detects and includes it when
+# the app is packaged. Uvicorn later imports it by string name ("backend:app"),
+# which static analyzers like PyInstaller may miss. Importing it here ensures
+# the module is bundled inside the EXE.
+try:
+    import backend  # type: ignore
+except Exception as e:
+    # Print full traceback to aid debugging when running as a frozen EXE.
+    import traceback
+    print("Failed to import 'backend' during startup. Full traceback:")
+    traceback.print_exc()
+    print("Exiting due to import error.")
+    # Exit with non-zero code so the calling process sees the failure
+    sys.exit(1)
 
 ROOT = Path(__file__).parent
 

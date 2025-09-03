@@ -30,7 +30,6 @@ from xml.etree import ElementTree as ET
 import mimetypes
 import posixpath
 import tempfile
-import shutil
 import base64
 
 import bleach
@@ -41,7 +40,7 @@ from ebooklib import epub, ITEM_DOCUMENT
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 # staticfiles not required; explicit FileResponse routes are used for root assets
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Column, String
@@ -941,8 +940,8 @@ def get_or_build_cover(book: "Book") -> Optional[Path]:
     if cache_path and cache_path.exists():
         return cache_path
 
-    # Try extract from EPUB
-    data_ext = try_extract_cover_from_epub(Path(book.path))
+    # Try extract from EPUB (resolve stored path first)
+    data_ext = try_extract_cover_from_epub(resolve_book_path(book.path))
     if data_ext is not None:
         data, ext = data_ext
         return _save_cover_bytes(book.sha256, data, ext)
@@ -999,15 +998,24 @@ def index_library(_session: Optional[Session], library_path: Path) -> Dict[str, 
                 if existing:
                     # Update minimal fields if path or timestamps changed
                     changed = False
+                    # Determine stored path: prefer relative path inside library_path
+                    try:
+                        if epub_path.is_relative_to(library_path):
+                            stored_path = epub_path.relative_to(library_path).as_posix()
+                        else:
+                            stored_path = epub_path.as_posix()
+                    except Exception:
+                        stored_path = epub_path.as_posix()
+
                     if (
-                        existing.path != epub_path.as_posix()
+                        existing.path != stored_path
                         or existing.size_bytes != size_bytes
                         or existing.modified_iso != modified_iso
                         or existing.title != title
                         or existing.author != author
                         or existing.language != language
                     ):
-                        existing.path = epub_path.as_posix()
+                        existing.path = stored_path
                         existing.size_bytes = size_bytes
                         existing.modified_iso = modified_iso
                         existing.title = title
@@ -1021,11 +1029,20 @@ def index_library(_session: Optional[Session], library_path: Path) -> Dict[str, 
                         skipped += 1
                         continue
                 else:
+                    # Store relative path when possible so the library can be relocated
+                    try:
+                        if epub_path.is_relative_to(library_path):
+                            stored_path = epub_path.relative_to(library_path).as_posix()
+                        else:
+                            stored_path = epub_path.as_posix()
+                    except Exception:
+                        stored_path = epub_path.as_posix()
+
                     book = Book(
                         title=title or epub_path.stem,
                         author=author or "Unknown",
                         language=language,
-                        path=epub_path.as_posix(),
+                        path=stored_path,
                         size_bytes=size_bytes,
                         modified_iso=modified_iso,
                         sha256=sha,
@@ -1751,6 +1768,35 @@ if CONFIG.cors_origins:
         return Path.cwd() / "config.json"
 
 
+    def resolve_book_path(book_path: Optional[str]) -> Path:
+        """Return a Path to the book file on disk.
+
+        Behavior:
+        - If book_path is absolute and exists, return it (backwards compatibility).
+        - Otherwise, join it against CONFIG.library_path and return that Path.
+        - The returned Path may not exist; callers should check and raise a 404 if needed.
+        """
+        if not book_path:
+            return Path("")
+        try:
+            p = Path(book_path)
+        except Exception:
+            p = Path(str(book_path))
+        # If absolute and exists, prefer it
+        try:
+            if p.is_absolute() and p.exists():
+                return p
+        except Exception:
+            pass
+        # Otherwise, prefix with configured library path
+        try:
+            lib = Path(CONFIG.library_path)
+            candidate = (lib / book_path).resolve()
+            return candidate
+        except Exception:
+            return p
+
+
     @app.get("/api/config")
     def api_get_config() -> Dict[str, Any]:
         # Return serializable dict
@@ -2206,7 +2252,26 @@ def download_book(book_id: int, session: Session = Depends(get_session)):
     book = session.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
-    file_path = Path(book.path)
+    file_path = resolve_book_path(book.path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    return FileResponse(
+        file_path.as_posix(),
+        media_type="application/epub+zip",
+        filename=f"{book.title}.epub",
+    )
+
+
+@app.get("/download/{book_id}.epub")
+def download_book_epub(book_id: int, session: Session = Depends(get_session)):
+    """Compatibility alias: same as /download/{book_id} but with .epub extension in URL.
+
+    Some simple browsers/e-readers decide by URL extension; providing this alias improves compatibility.
+    """
+    book = session.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    file_path = resolve_book_path(book.path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
     return FileResponse(
@@ -2293,7 +2358,7 @@ def ebook_download(book_id: int, session: Session = Depends(get_session)):
     book = session.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
-    file_path = Path(book.path)
+    file_path = resolve_book_path(book.path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
     return FileResponse(
@@ -2303,12 +2368,106 @@ def ebook_download(book_id: int, session: Session = Depends(get_session)):
     )
 
 
+@app.get("/ebook/download/{book_id}")
+def ebook_download_interstitial(book_id: int, session: Session = Depends(get_session)):
+    """Return a tiny HTML page that redirects (meta-refresh) to the .epub URL and provides a plain anchor.
+
+    This helps extremely limited browsers/e-readers which may require navigation through an HTML page
+    or which reject navigation from JS-inserted anchors.
+    """
+    book = session.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    # Target: prefer the range-capable raw endpoint which streams the file and supports partial requests
+    target = f"/ebook/raw/{book_id}.epub"
+    html = f"""<!doctype html>
+<html><head><meta charset='utf-8'><meta http-equiv='refresh' content='0;url={target}' />
+<title>Descargando {book.title}</title>
+</head><body>
+<p>Si la descarga no comienza automáticamente, <a href=\"{target}\">haz clic aquí para descargar {book.title}</a>.</p>
+</body></html>"""
+    return Response(content=html, media_type="text/html; charset=utf-8")
+
+
+def iter_file_range(path: Path, start: int = 0, end: Optional[int] = None, chunk_size: int = 64 * 1024):
+    """Yield bytes from path between start and end (inclusive start, exclusive end).
+
+    end is exclusive if provided. This generator is safe for streaming large files.
+    """
+    with path.open('rb') as f:
+        f.seek(start)
+        remaining = None if end is None else (end - start)
+        while True:
+            read_size = chunk_size if remaining is None else min(chunk_size, remaining)
+            data = f.read(read_size)
+            if not data:
+                break
+            yield data
+            if remaining is not None:
+                remaining -= len(data)
+                if remaining <= 0:
+                    break
+
+
+@app.get('/ebook/raw/{book_id}.epub')
+def ebook_raw_epub(book_id: int, range: Optional[str] = Query(default=None), session: Session = Depends(get_session)):
+    """Stream EPUB with support for Range requests. Returns 206 when Range header present.
+
+    Some simple clients behave better when the server supports byte ranges and proper Content-Disposition.
+    """
+    book = session.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail='Book not found')
+    file_path = resolve_book_path(book.path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail='File not found on disk')
+
+    fs = file_path.stat()
+    file_size = fs.st_size
+    # Accept a simple Range header style provided by proxies via query param 'range' as fallback
+    # but real clients will send a Range header; support both via range param or env fallback.
+    # If 'range' query param is provided, it should be like 'bytes=start-end'
+    start = 0
+    end = file_size - 1
+    if range:
+        try:
+            if range.startswith('bytes='):
+                r = range[len('bytes='):]
+                if '-' in r:
+                    s, e = r.split('-', 1)
+                    start = int(s) if s else 0
+                    end = int(e) if e else end
+        except Exception:
+            pass
+
+    def stream():
+        for chunk in iter_file_range(file_path, start=start, end=end + 1):
+            yield chunk
+
+    headers = {
+        'Accept-Ranges': 'bytes',
+        'Content-Type': 'application/epub+zip',
+        'Content-Disposition': f'attachment; filename="{book.title}.epub"',
+    }
+    # If the client requested a range, return 206 Partial Content
+    if start != 0 or end != file_size - 1:
+        content_length = end - start + 1
+        headers.update({
+            'Content-Range': f'bytes {start}-{end}/{file_size}',
+            'Content-Length': str(content_length),
+        })
+        return StreamingResponse(stream(), status_code=206, headers=headers)
+
+    headers['Content-Length'] = str(file_size)
+    return StreamingResponse(stream(), media_type='application/epub+zip', headers=headers)
+
+
 @app.get("/open/{book_id}")
 def open_book(book_id: int, session: Session = Depends(get_session)):
     book = session.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
-    file_path = Path(book.path)
+    file_path = resolve_book_path(book.path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
     try:

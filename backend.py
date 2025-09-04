@@ -12,7 +12,7 @@ Notes:
 - Config loaded from SKALD_CONFIG env var or ./config.json; sensible defaults otherwise.
 """
 from __future__ import annotations
-
+import sys
 import json
 import logging
 import os
@@ -98,32 +98,54 @@ class AppConfig(BaseModel):
             raise ValueError("must be positive")
         return v
 
-
-def load_config(path_override: Optional[str | Path] = None) -> AppConfig:
-    logger = logging.getLogger("skald")
-    cfg_path_env = os.environ.get("SKALD_CONFIG")
-    candidate_paths: List[Path] = []
+def load_config(path_override: Optional[str|Path] = None) -> AppConfig:
+    """Load config from SKALD_CONFIG env var or ./config.json; sensible defaults otherwise."""
+    global _ROOT_DIR
+    
+    # Determinar directorio base
+    if getattr(sys, 'frozen', False):
+        # Ejecutable empaquetado
+        _ROOT_DIR = Path(sys._MEIPASS)
+    else:
+        # Desarrollo normal
+        _ROOT_DIR = Path(__file__).parent
+    
+    # Buscar config
+    candidate_paths = []
     if path_override:
         candidate_paths.append(Path(path_override))
-    if cfg_path_env:
-        candidate_paths.append(Path(cfg_path_env))
-    candidate_paths.append(Path.cwd() / "config.json")
-
+    if os.getenv("SKALD_CONFIG"):
+        candidate_paths.append(Path(os.getenv("SKALD_CONFIG")))
+    candidate_paths.extend([
+        Path("config.json"),
+        _ROOT_DIR / "config.json"
+    ])
+    
     for p in candidate_paths:
         try:
             if p.exists():
-                logger.info("Loading configuration from: %s", p)
+                # logger.info("Loading configuration from: %s", p)
                 with p.open("r", encoding="utf-8") as f:
                     data = json.load(f)
+                
+                # 🔧 Convertir rutas relativas a absolutas
+                config_dir = p.parent
+                if 'db_path' in data:
+                    db_path = Path(data['db_path'])
+                    if not db_path.is_absolute():
+                        data['db_path'] = str(config_dir / db_path)
+                if 'library_path' in data:
+                    lib_path = Path(data['library_path'])
+                    if not lib_path.is_absolute():
+                        data['library_path'] = str(config_dir / lib_path)
+                
                 config = AppConfig(**data)
-                logger.info("Configuration loaded successfully: lm_enabled=%s, lm_timeout=%s, lm_max_concurrency=%s, lm_min_interval_ms=%s", 
-                           config.lm_enabled, config.lm_timeout, config.lm_max_concurrency, config.lm_min_interval_ms)
                 return config
-        except Exception as e:
-            logger.warning("Failed loading config from %s: %s", p, e)
-    logger.info("Using default in-memory config; create config.json or set SKALD_CONFIG to customize.")
+        except Exception:
+            pass
+    
+    # Config por defecto
     return AppConfig()
-
 
 LOGGER = logging.getLogger("archive")
 logging.basicConfig(
@@ -242,20 +264,41 @@ def lm_rate_limit():
 
 
 def init_app(config_path: Optional[str] = None) -> None:
-    """(Re)initialize config and database engine/tables.
-
-    Safe to call multiple times in-process (used in tests).
+    """
+        (Re)initialize config and database engine/tables.
+        Safe to call multiple times in-process (used in tests).
     """
     global CONFIG, DB_PATH, ENGINE, LM, LM_SEMAPHORE, LM_LAST_REQUEST, COVERS_DIR, _COVER_LAST_REQUEST
+    
     CONFIG = load_config(config_path)
-    DB_PATH = Path(CONFIG.db_path)
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ENGINE = create_engine(f"sqlite:///{DB_PATH.as_posix()}", echo=False)
-    SQLModel.metadata.create_all(ENGINE)
-    # Covers directory next to DB
+    
+    # --- 🔧 CORRECCIÓN DE RUTAS ---
+    # Convertir db_path a ruta absoluta respecto al directorio actual
+    db_path = Path(CONFIG.db_path)
+    if not db_path.is_absolute():
+        db_path = Path.cwd() / db_path
+    db_path = db_path.resolve()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    DB_PATH = db_path
+    
+    # Asegurar que COVERS_DIR esté en el mismo directorio que la DB
     COVERS_DIR = DB_PATH.parent / "covers"
     COVERS_DIR.mkdir(parents=True, exist_ok=True)
+    # -----------------------------
+    
+    global ENGINE
+    ENGINE = create_engine(f"sqlite:///{DB_PATH}", echo=False)
+    
+    # Crear tablas si no existen
+    SQLModel.metadata.create_all(ENGINE)
+    
+    # Inicializar otros componentes...
+    LM = LMClient(CONFIG.lm_url, timeout=CONFIG.lm_timeout, enabled=CONFIG.lm_enabled, mock=CONFIG.lm_mock)
+    LM_SEMAPHORE = threading.Semaphore(CONFIG.lm_max_concurrency)
+    LM_LAST_REQUEST = 0.0
     _COVER_LAST_REQUEST = 0.0
+    
+    LOGGER.info("The Archive starting with DB=%s, library=%s", DB_PATH, CONFIG.library_path)
     # Init LM rate limiter
     max_concurrency = max(1, int(CONFIG.lm_max_concurrency))
     LM_SEMAPHORE = threading.Semaphore(max_concurrency)

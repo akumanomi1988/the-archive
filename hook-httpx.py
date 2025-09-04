@@ -1,10 +1,9 @@
 # hook-httpx.py
 hiddenimports = [
-    'httpcore',
-    'httpx._config',
-    'httpx._content',
-    'httpx._exceptions',
+    'httpx._client',
     'httpx._models',
+    'httpx._config',
+    'httpx._exceptions',
     'httpx._status_codes',
     'httpx._transports.asgi',
     'httpx._transports.wsgi',
@@ -13,9 +12,5 @@ hiddenimports = [
     'httpx._utils',
 ]
 
-# Evita que PyInstaller analice el código problemático
-excludedimports = [
-    'httpx._client',
-    'httpx._client.AsyncClient',
-    'httpx._client.Client',
-]
+# Evita que PyInstaller excluya módulos importantes
+excludedimports = []

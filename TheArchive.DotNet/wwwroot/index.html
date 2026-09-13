@@ -1,0 +1,2057 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>The Archive</title>
+  <link rel="icon" href="biblioteca.svg" type="image/svg+xml">
+  <!-- Fallbacks: browsers will use PNG/ICO if available -->
+  <link rel="icon" href="favicon-256.png" sizes="256x256" type="image/png">
+  <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
+  <meta name="color-scheme" content="light dark" />
+  <style>
+    /* Design tokens */
+    :root {
+      --radius: 12px;
+      --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem; --space-5: 1.5rem; --space-6: 2rem;
+      --shadow-1: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.08);
+      --font-ui: system-ui, -apple-system, "SF Pro Text", Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      --maxw: 1220px;
+    }
+    :root[data-theme="light"] {
+      --bg: #f5f5f7;
+      --panel: #ffffffcc;            /* translucent for glass effect */
+      --panel-solid: #ffffff;
+      --elev: #ffffff;
+      --fg: #0f172a;
+      --muted: #475569;
+      --line: #e5e7eb;
+      --accent: #0a84ff;            /* apple blue */
+      --accent-fg: #ffffff;
+      --chip: #f1f5f9;
+      --chip-fg: #334155;
+      --kbd-bg:#f8fafc; --kbd-fg:#334155; --kbd-br:#e2e8f0;
+    }
+    :root[data-theme="dark"] {
+      --bg: #0d0f14;
+      --panel: #0f172acc;
+      --panel-solid: #0f172a;
+      --elev: #121826;
+      --fg: #e6edf5;
+      --muted: #9aa8bb;
+      --line: #1f2a40;
+      --accent: #0a84ff;
+      --accent-fg: #08111f;
+      --chip: #111a2f;
+      --chip-fg: #b8c6d9;
+      --kbd-bg:#0b1220; --kbd-fg:#cbd5e1; --kbd-br:#1f2a40;
+    }
+
+    /* Base */
+    html, body { 
+      height: 100%; 
+      margin: 0; 
+      padding: 0; 
+      overflow-x: hidden; /* Solo prevenir scroll horizontal */
+    }
+    body {
+      background: var(--bg); color: var(--fg); font-family: var(--font-ui);
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      display: flex; 
+      flex-direction: column; 
+      min-height: 100vh; /* Usar vh en lugar de svh para mejor compatibilidad */
+    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-4); }
+
+    /* Glass nav */
+    header {
+      position: sticky; top:0; z-index:10;
+      backdrop-filter: saturate(160%) blur(16px);
+      -webkit-backdrop-filter: saturate(160%) blur(16px);
+      background: var(--panel);
+      border-bottom: 1px solid color-mix(in oklab, var(--panel-solid) 70%, var(--line));
+    }
+    .nav {
+      display:flex; align-items:center; gap: var(--space-4); padding: .9rem 0;
+    }
+    .brand {
+      display:flex; align-items:center; gap:.75rem; font-weight:700; letter-spacing:.2px; font-size:1.1rem;
+    }
+  .logo { width: 28px; height: 28px; border-radius: 8px; display:block; object-fit:contain; }
+    .toolbar { margin-left:auto; display:flex; align-items:center; gap:.6rem; }
+
+    /* Segmented controls */
+    .seg {
+      display:flex; gap:.25rem; background: color-mix(in oklab, var(--panel-solid) 85%, transparent);
+      color: var(--fg); padding:.25rem; border-radius: 999px; align-items:center;
+      border: 1px solid var(--line);
+    }
+    .seg button, .seg select {
+      background: transparent; color: inherit; border: 0; padding:.45rem .75rem; border-radius: 999px;
+      font: inherit; cursor: pointer; line-height: 1;
+    }
+    .seg button.active { background: var(--accent); color: var(--accent-fg); box-shadow: 0 1px 0 rgba(0,0,0,.1) inset; }
+  /* Prefer native select appearance for compatibility; preserve some padding for the chev */
+  .seg select { -webkit-appearance: menulist-button; appearance: auto; padding-right: 1.8rem; position: relative; z-index:1; touch-action: manipulation; }
+    .seg .chev { margin-left:-1.4rem; pointer-events:none; opacity:.55; }
+
+    /* Filters row */
+    .filters {
+      display:flex; gap:.5rem; flex-wrap: wrap; padding: .9rem 0 1rem;
+      align-items: center; position: relative; z-index: 2; /* keep controls above results */
+    }
+    .pill {
+      background: var(--elev); color: var(--fg); border:1px solid var(--line);
+      border-radius: 999px; padding:.6rem .9rem; outline: none; display:flex; align-items:center; gap:.5rem; overflow: visible;
+    }
+    .pill input { background: transparent; border:0; color: inherit; outline:none; min-width: 12ch; }
+  .pill select { background: transparent; border:0; color: inherit; outline:none; min-width: 12ch; font: inherit; -webkit-appearance: menulist-button; appearance: auto; touch-action: manipulation; }
+  .pill .lbl { font-size: .82rem; color: var(--muted); margin-right: .25rem; white-space: nowrap; }
+    .pill input::placeholder { color: var(--muted); }
+    .btn { border-radius: 999px; padding:.6rem 1rem; border:1px solid var(--line); background: var(--elev); color: var(--fg); cursor:pointer; }
+    .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+    .btn.ghost { background: transparent; }
+    .btn:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent); outline-offset: 2px;
+    }
+
+    /* Main layout */
+    main { 
+      padding: var(--space-3) 0 env(safe-area-inset-bottom); 
+      flex: 1 1 auto; 
+      overflow: hidden; 
+      min-height: 0; /* Importante para flexbox */
+    }
+    .grid { 
+      display: grid; 
+      grid-template-columns: 1.15fr 1fr; 
+      gap: var(--space-5); 
+      align-items: stretch; 
+      height: 100%; 
+      min-height: 0; 
+    }
+    .wrap.grid { 
+      height: 100%; 
+      min-height: 0; 
+      max-height: 100%; /* Prevenir overflow */
+    }
+    @media (max-width: 1100px) { 
+      .grid { 
+        grid-template-columns: 1fr; 
+        grid-template-rows: 1fr auto; /* En móvil, hacer el viewer más pequeño */
+      } 
+    }
+    /* Mobile improvements: keep results and reader separately scrollable and allow toggling */
+   @media (max-width: 768px) {
+    /* Stack panels on narrow viewports and keep both areas scrollable.
+      If the user toggles the results visibility, prefer hiding the
+      viewer on small screens so the list remains accessible. */
+    .wrap.grid { display:block; }
+    .panel { margin-bottom: .75rem; }
+    main { padding: .5rem 0; }
+    #results { max-height: 55vh; overflow-y:auto; }
+    .viewer { max-height: 55vh; overflow:auto; }
+    /* On narrow viewports, treat results-hidden as "hide viewer" so the
+      book list is still visible for users on small/ebook browsers. */
+    body.results-hidden .viewer { display: none; }
+    body.results-hidden #results { display: block; }
+   }
+
+    /* Panels */
+    .panel {
+      background: var(--panel-solid); 
+      border: 1px solid var(--line); 
+      border-radius: var(--radius); 
+      box-shadow: var(--shadow-1);
+      overflow: hidden; 
+      display: flex; 
+      flex-direction: column; 
+      min-height: 0; 
+      height: 100%;
+      max-height: 100vh; /* Prevenir que crezca más que la ventana */
+    }
+    .results { 
+      flex: 1 1 auto; 
+      overflow-y: auto; 
+      overflow-x: hidden;
+      padding: .5rem; 
+      -webkit-overflow-scrolling: touch;
+      /* Scroll suave en WebKit */
+      scrollbar-width: thin;
+      scrollbar-color: var(--line) transparent;
+    }
+    /* Mejorar scrollbars en WebKit */
+    .results::-webkit-scrollbar {
+      width: 8px;
+    }
+    .results::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .results::-webkit-scrollbar-thumb {
+      background-color: var(--line);
+      border-radius: 4px;
+    }
+    .results::-webkit-scrollbar-thumb:hover {
+      background-color: var(--muted);
+    }
+    .viewer { min-height: 0; height: 100%; display:flex; flex-direction: column; }
+  .viewer-head { padding: .6rem .8rem; border-bottom:1px solid var(--line); display:flex; flex-direction: column; gap:.5rem; }
+  .viewer-head .spacer { flex:1 1 auto; }
+  .controls-row { display:flex; align-items:center; gap:.6rem; flex-wrap: wrap; }
+    .viewer-body { flex: 1 1 auto; min-height: 0; overflow:hidden; padding: .6rem; display:flex; }
+    .reader {
+      width:100%; min-height: 0; border:1px solid var(--line); background: var(--panel-solid);
+      border-radius: 10px; color: var(--fg);
+      font-size: var(--reader-font-size, 1rem);
+      line-height: var(--reader-line-height, 1.6);
+      font-family: var(--reader-family, serif);
+      padding: var(--reader-padding, 1.25rem);
+      overflow: auto; -webkit-overflow-scrolling: touch;
+      display: block;
+    }
+    /* Legacy ebook compatibility: normalize images and iframes inside reader */
+    .reader img { max-width: 100%; height: auto; display:block; margin: .6rem 0; }
+    .reader iframe, .reader embed, .reader object { display:block; max-width:100%; }
+    .reader [style*="position:"] { position: static !important; }
+  .reader.page-mode { scroll-behavior: smooth; scroll-snap-type: y mandatory; }
+  .reader.page-mode * { scroll-snap-align: start; }
+    /* Optional margins for readability */
+    .reader p { margin: 0 0 0.75em; }
+
+    /* Book list - Diseño mejorado */
+    .book {
+      background: var(--panel-solid);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      position: relative;
+      /* Prevenir problemas de layout */
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    /* Contenedor del listado */
+    #list {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .book:hover { 
+      background: color-mix(in oklab, var(--panel-solid) 95%, var(--accent) 5%); 
+      transform: translateY(-2px); 
+      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+      border-color: var(--accent);
+    }
+    
+    .book-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    
+    .book-info {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .book h4 { 
+      margin: 0 0 0.25rem 0; 
+      font-size: 1.1rem; 
+      line-height: 1.4; 
+      font-weight: 600;
+      color: var(--fg);
+    }
+    
+    .book-author {
+      font-size: 0.95rem;
+      color: var(--muted);
+      font-weight: 500;
+      margin-bottom: 0.5rem;
+    }
+    
+    .book-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+    
+    .book-meta .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    
+    .book-meta .meta-separator {
+      color: var(--line);
+    }
+    
+    .book-state-icons {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+    }
+    
+    .state-icon { 
+      font-size: 1rem;
+      padding: 0.2rem;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.05);
+    }
+    .state-icon[title="Favorito"] { color: #ff9500; background: rgba(255,149,0,0.15); }
+    .state-icon[title="Leído"] { color: #34c759; background: rgba(52,199,89,0.15); }
+    .state-icon[title="Pendiente"] { color: #007aff; background: rgba(0,122,255,0.15); }
+    .state-icon[title="Con marcadores"] { color: #8e44ad; background: rgba(142,68,173,0.15); }
+    .state-icon[title="Con notas"] { color: #e67e22; background: rgba(230,126,34,0.15); }
+    
+    .chips { 
+      display: flex; 
+      gap: 0.4rem; 
+      flex-wrap: wrap; 
+      margin-bottom: 0.75rem;
+    }
+    .chip { 
+      background: var(--chip); 
+      color: var(--chip-fg); 
+      border: 1px solid var(--line); 
+      padding: 0.25rem 0.6rem; 
+      border-radius: 6px; 
+      font-size: 0.75rem;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    .chip:hover {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border-color: var(--accent);
+    }
+
+    /* Progress bar mejorada */
+    .progress-bar { 
+      width: 100%; 
+      height: 6px; 
+      background: var(--line); 
+      border-radius: 3px; 
+      margin: 0.5rem 0;
+      overflow: hidden;
+    }
+    .progress-fill { 
+      height: 100%; 
+      background: linear-gradient(90deg, var(--accent), color-mix(in oklab, var(--accent) 80%, #fff 20%)); 
+      border-radius: 3px; 
+      transition: width 0.3s ease;
+      position: relative;
+    }
+    .progress-fill::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      animation: shimmer 2s infinite;
+    }
+    
+    @keyframes shimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    
+    /* History breadcrumbs */
+    .history { display: flex; gap: .5rem; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--line); }
+    .history-item { background: var(--chip); color: var(--chip-fg); padding: .2rem .5rem; border-radius: 999px; font-size: .75rem; cursor: pointer; }
+    .history-item:hover { background: var(--accent); color: var(--accent-fg); }
+    
+    /* Grid view */
+    /* Grid view mejorada */
+    .grid-view #list { 
+      display: grid; 
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); 
+      gap: 1.5rem; 
+      padding: 1rem;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .grid-view .book { 
+      display: flex; 
+      flex-direction: column; 
+      width: 100%;
+      margin: 0;
+      text-align: left;
+      min-height: 200px;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    /* Cover image styles (shared for list and grid) */
+    .book-cover { position: relative; }
+    .book-cover .cover-img { 
+      width: 100%; 
+      aspect-ratio: 2 / 3; 
+      object-fit: cover; 
+      border-radius: 10px; 
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2); 
+      background: #222; 
+    }
+    /* In list mode, shrink the cover on the right */
+    .book-header .book-cover { flex: 0 0 120px; }
+    .book-header .book-cover .cover-img { width: 120px; }
+    
+    /* Efectos adicionales para las fichas */
+    .book-checkbox {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      width: 20px;
+      height: 20px;
+      accent-color: var(--accent);
+      z-index: 2;
+    }
+    
+    /* Estados de enriquecimiento */
+    .book[data-enrichment-status="ok"] {
+      border-left: 4px solid #34c759;
+    }
+    .book[data-enrichment-status="failed"] {
+      border-left: 4px solid #ff3b30;
+    }
+    .book[data-enrichment-status="none"] {
+      border-left: 4px solid var(--muted);
+    }
+    
+    /* Indicador de clic */
+    .book:active {
+      transform: translateY(0px) scale(0.98);
+    }
+    
+    /* Mejoras para dispositivos móviles */
+    @media (max-width: 768px) {
+      .book {
+        margin-bottom: 0.75rem;
+        padding: 1rem;
+      }
+      .actions {
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .action {
+        justify-content: center;
+        min-width: 100%;
+      }
+      .grid-view #list {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 1rem;
+        padding: 0.5rem;
+      }
+    }
+    
+    /* Animación de carga para enriquecimiento */
+    .book.enriching {
+      position: relative;
+      opacity: 0.7;
+    }
+    .book.enriching::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+      animation: loading 1.5s infinite;
+    }
+    
+    @keyframes loading {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    .batch-mode .book-checkbox { position: absolute; top: .5rem; left: .5rem; z-index: 2; }
+    .batch-toolbar { 
+      display: none; 
+      padding: .5rem; 
+      background: var(--elev); 
+      border-bottom: 1px solid var(--line); 
+      gap: .5rem; 
+      align-items: center;
+      flex-shrink: 0; /* No reducir la toolbar */
+      min-height: 48px; /* Altura consistente */
+      flex-wrap: wrap; /* Permitir wrap en pantallas pequeñas */
+    }
+    .batch-mode .batch-toolbar { display: flex; }
+    
+    /* Group headers */
+    .group-header { background: var(--chip); color: var(--chip-fg); padding: .5rem 1rem; margin: .5rem 0; border-radius: 8px; font-weight: bold; }
+    
+    /* Night mode auto detection */
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme]) { --bg: #0d0f14; --panel: #0f172acc; --panel-solid: #0f172a; --elev: #121826; --fg: #e6edf5; --muted: #9aa8bb; --line: #1f2a40; --accent: #0a84ff; --accent-fg: #08111f; --chip: #111a2f; --chip-fg: #b8c6d9; --kbd-bg:#0b1220; --kbd-fg:#cbd5e1; --kbd-br:#1f2a40; }
+    }
+
+    .actions { display:flex; gap:.4rem; margin-top:.35rem; flex-wrap: wrap; }
+    /* Actions mejoradas */
+    .actions { 
+      display: flex; 
+      gap: 0.5rem; 
+      flex-wrap: wrap;
+      align-items: center;
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--line);
+      z-index: 10; /* Asegurar que esté encima */
+      position: relative; /* Para que z-index funcione */
+    }
+    .action { 
+      padding: 0.5rem 1rem; 
+      border-radius: 8px; 
+      border: 1px solid var(--line); 
+      background: var(--bg); 
+      color: var(--fg); 
+      cursor: pointer; 
+      font-size: 0.85rem;
+      font-weight: 500;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.15s ease;
+      min-height: 36px;
+      box-sizing: border-box;
+      z-index: 10; /* Asegurar que esté encima */
+      position: relative; /* Para que z-index funcione */
+    }
+    .action:hover { 
+      background: var(--accent); 
+      color: var(--accent-fg); 
+      border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .action.ghost { 
+      background: transparent; 
+      border-color: transparent;
+      color: var(--muted);
+    }
+    .action.ghost:hover { 
+      background: var(--elev); 
+      color: var(--fg);
+      border-color: var(--line);
+    }
+    
+    .action.primary {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border-color: var(--accent);
+    }
+    .action.primary:hover {
+      background: color-mix(in oklab, var(--accent) 90%, #000 10%);
+      transform: translateY(-1px);
+      box-shadow: 0 3px 12px rgba(0,0,0,0.2);
+    }
+    
+    .action-icon {
+      font-size: 0.9rem;
+    }
+    .action.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+    .footerbar { 
+      padding: .6rem .8rem; 
+      border-top: 1px solid var(--line); 
+      display: flex; 
+      align-items: center; 
+      gap: .6rem; 
+      background: color-mix(in oklab, var(--panel-solid) 92%, transparent);
+      flex-shrink: 0; /* No reducir el footer */
+      min-height: 48px; /* Altura mínima consistente */
+    }
+    .spacer { flex: 1 1 auto; }
+    .status { padding:.35rem .6rem; background: var(--chip); color: var(--chip-fg); border:1px solid var(--line); border-radius: 999px; }
+    .kbd{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; padding:.05rem .35rem; border-radius:6px; border:1px solid var(--kbd-br); background:var(--kbd-bg); color:var(--kbd-fg); font-size:.82em;}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;clip:rect(0,0,0,0);white-space:nowrap;border:0;overflow:hidden}
+
+  @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+
+    /* E-reader and high-contrast friendly fallbacks */
+    @media (prefers-contrast: more) {
+      .logo { box-shadow: none; }
+    }
+    @media (forced-colors: active) {
+      header, .panel, .pill, .btn, .action, .chip, .footerbar { border: 1px solid CanvasText; }
+      .btn.primary, .action.primary { background: Highlight; color: HighlightText; }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      header { background: var(--panel-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+    }
+    /* Small screens adjustments */
+    @media (max-width: 600px) {
+      .nav { padding: .6rem 0; flex-wrap: wrap; }
+      .brand { flex: 1 1 auto; }
+      .toolbar { margin-left: 0; width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+      .filters { padding: .6rem 0 .8rem; gap: .4rem; }
+  .mobile-only { display: inline-flex; }
+      .pill input { min-width: 10ch; }
+      .grid { gap: var(--space-4); }
+      .btn, .action { padding:.55rem .9rem; }
+      .viewer-body { padding: .75rem; }
+    }
+    /* Extra compact mode for very small screens and simple browsers */
+    @media (max-width: 420px) {
+      .brand { font-size: .98rem; gap:.4rem; }
+      .logo { width: 22px; height:22px; }
+      .toolbar { gap:.35rem; }
+      /* hide non-essential segmented controls to save space */
+      .toolbar .seg:nth-child(n+2){ display:none; }
+      /* ensure search input takes available width */
+  .filters { align-items:stretch; }
+      .pill { flex:1 1 auto; min-width: 0; }
+      .pill input, .pill select { width:100%; }
+      /* Stack panels vertically and allow flexible scrolling areas so the
+         results list remains visible even when filters wrap on small screens */
+      .wrap.grid { display:flex; flex-direction:column; gap: var(--space-4); }
+      section.panel { width: 100%; }
+      .results { flex: 0 1 auto; min-height: 30vh; max-height: 55vh; overflow: auto; }
+      #list { display: block; }
+      .viewer { flex: 0 1 auto; min-height: 35vh; max-height: 65vh; overflow: auto; }
+      .viewer-body { overflow: auto; }
+  /* Mobile-only toggle button visibility */
+  .mobile-only { display:inline-flex; align-items:center; justify-content:center; margin-right:.5rem; }
+  .filters.collapsed { display: none !important; }
+  /* Filter toggle visuals */
+  .filter-toggle { gap:.4rem; padding:.45rem .6rem; border-radius:999px; align-items:center; }
+  .filter-toggle .filter-label{ font-size:.92rem; font-weight:600; }
+  .filter-toggle .filter-chev{ transition: transform .2s ease; display:inline-block; }
+  .filter-toggle[aria-expanded="true"] .filter-chev{ transform: rotate(180deg); }
+    }
+    /* Simple / E-ink readers: reduce heavy effects and shadows */
+    @media (forced-colors: active), (prefers-reduced-transparency: reduce) {
+      header, .panel, .pill, .btn, .action, .chip, .footerbar { box-shadow: none; background: var(--panel-solid); }
+      .nav, .filters { padding: .5rem; }
+      .logo { display:inline-block; }
+      .reader { -webkit-text-size-adjust: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap nav">
+      <div class="brand" aria-label="The Archive">
+        <!-- Inlined SVG logo (from biblioteca.svg) -->
+        <img class="logo" src="/biblioteca.svg" alt="">
+        <span id="lbl-app">The Archive</span>
+      </div>
+  <div class="toolbar">
+        <div class="seg" role="group" aria-label="Theme toggle">
+          <button id="btn-theme-auto" aria-pressed="true" title="Auto" class="active">A</button>
+          <button id="btn-theme-light" aria-pressed="false" title="Light">☀️</button>
+          <button id="btn-theme-dark" aria-pressed="false" title="Dark">🌙</button>
+        </div>
+        <div class="seg" role="group" aria-label="Language">
+          <select id="lang" aria-label="Language select">
+            <option value="es">ES</option>
+            <option value="en">EN</option>
+            <option value="fr">FR</option>
+            <option value="de">DE</option>
+            <option value="pt">PT</option>
+          </select>
+          <span class="chev">▾</span>
+  </div>
+  <button id="btnServerInfo" class="btn ghost" title="Server info">🔗</button>
+  <a href="/legacy" class="btn ghost" title="Versión para navegadores antiguos">Legacy</a>
+  <button id="btnToggleResults" class="btn ghost" title="Mostrar resultados">📚</button>
+  <button id="btnToggleFilters" class="btn ghost mobile-only filter-toggle" title="Mostrar / ocultar filtros" aria-expanded="false">
+      <span class="filter-label">Filtros</span>
+      <span class="filter-chev">▾</span>
+  </button>
+      </div>
+    </div>
+    <div class="wrap filters" role="search">
+      <label class="pill" aria-label="Buscar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="q" placeholder="Buscar..." aria-label="Buscar texto">
+      </label>
+      <label class="pill">
+        <span class="lbl" id="lbl-author">Autor</span>
+        <input id="autor_in" list="autor_list" aria-label="Autor" placeholder="Escribe 3+ letras...">
+        <datalist id="autor_list"></datalist>
+      </label>
+      <label class="pill"><span class="lbl" id="lbl-title">Título</span><input id="titulo" placeholder="Título" aria-label="Título"></label>
+      <label class="pill">
+        <span class="lbl" id="lbl-genre">Género</span>
+        <select id="genre" aria-label="Género"><option value="">Género</option></select>
+      </label>
+      <label class="pill">
+        <span class="lbl" id="lbl-year-from">Desde</span>
+        <select id="year_from" aria-label="Año desde"></select>
+      </label>
+      <label class="pill">
+        <span class="lbl" id="lbl-year-to">Hasta</span>
+        <select id="year_to" aria-label="Año hasta"></select>
+      </label>
+      <label class="pill">
+        <span class="lbl" id="lbl-state">Estado</span>
+        <select id="state" aria-label="Estado">
+          <option value="">—</option>
+          <option value="favorite">Favoritos</option>
+          <option value="read">Leídos</option>
+          <option value="pending">Pendientes</option>
+        </select>
+      </label>
+      <label class="pill">
+        <span class="lbl">Vista</span>
+        <select id="viewMode" aria-label="Modo de vista">
+          <option value="list">Lista</option>
+          <option value="grid">Cuadrícula</option>
+        </select>
+      </label>
+      <label class="pill">
+        <span class="lbl">Ordenar</span>
+        <select id="sortBy" aria-label="Ordenar por">
+          <option value="title">Título</option>
+          <option value="author">Autor</option>
+          <option value="year">Año</option>
+          <option value="added">Fecha añadido</option>
+          <option value="progress">Progreso</option>
+          <option value="genre">Género</option>
+        </select>
+      </label>
+      <label class="pill">
+        <span class="lbl">Agrupar</span>
+        <select id="groupBy" aria-label="Agrupar por">
+          <option value="">Sin agrupar</option>
+          <option value="author">Por autor</option>
+          <option value="genre">Por género</option>
+          <option value="year">Por año</option>
+        </select>
+      </label>
+      <button class="btn primary" id="btnSearch">Buscar</button>
+      <button class="btn" id="btnReindex" title="Reindexar">Reindex</button>
+      <button class="btn" id="btnEnrichAll" title="Enriquecer todos">Enriquecer todo</button>
+      <button class="btn" id="btnEnrichNew" title="Enriquecer nuevos">Enriquecer nuevos</button>
+      <button class="btn ghost" id="btnBatchMode" title="Selección múltiple">☑️ Batch</button>
+      <button class="btn ghost" id="btnExport" title="Exportar biblioteca">📤 Export</button>
+      <span class="status" id="status">Listo.</span>
+    </div>
+  </header>
+  <div id="serverBanner" style="background:var(--panel);border-bottom:1px solid var(--line);padding:.5rem .75rem;display:flex;align-items:center;gap:.6rem;">
+    <div style="font-size:.95rem">Conectar a: <span id="serverUrl">http://localhost:8000</span></div>
+    <div class="spacer"></div>
+    <button id="openSettingsInline" class="btn">Editar configuración</button>
+  </div>
+
+  <main>
+    <div class="wrap grid">
+      <section class="panel">
+        <div class="batch-toolbar">
+          <span id="batchCount">0 seleccionados</span>
+          <button class="btn" id="btnBatchRead">Marcar leídos</button>
+          <button class="btn" id="btnBatchFavorite">Marcar favoritos</button>
+          <button class="btn" id="btnBatchDelete">Desmarcar</button>
+          <button class="btn ghost" id="btnBatchCancel">Cancelar</button>
+        </div>
+        <div class="results" id="results">
+          <div id="list"></div>
+        </div>
+        <div class="footerbar">
+          <button class="btn" id="prev">◀</button>
+          <span id="pageinfo" class="meta"></span>
+          <button class="btn" id="next">▶</button>
+          <div class="spacer"></div>
+          <span class="meta"><span id="lbl-tip">Tip:</span> <span class="kbd">Enter</span> <span id="lbl-tip2">to search</span></span>
+        </div>
+      </section>
+
+      <section class="panel viewer" id="viewerPanel">
+        <div class="viewer-head">
+          <div class="meta" id="detail">—</div>
+          <div class="controls-row">
+            <div class="seg" role="group" aria-label="Reader mode">
+              <button id="btnModeScroll" class="active" title="Scroll">Scroll</button>
+              <button id="btnModePaged" title="Páginas">📖</button>
+            </div>
+            <div class="seg" role="group" aria-label="Font size">
+              <button id="btnFontMinus" title="A-">A-</button>
+              <button id="btnFontPlus" title="A+">A+</button>
+            </div>
+            <div class="seg" role="group" aria-label="Font family">
+              <select id="fontFamily" aria-label="Font family">
+                <option value="serif">Serif</option>
+                <option value="Georgia, serif">Georgia</option>
+                <option value="'Palatino Linotype', Palatino, serif">Palatino</option>
+                <option value="'Times New Roman', Times, serif">Times</option>
+                <option value="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">Sans</option>
+                <option value="Helvetica, Arial, sans-serif">Helvetica</option>
+                <option value="Verdana, Geneva, sans-serif">Verdana</option>
+              </select>
+              <span class="chev">▾</span>
+            </div>
+            <div class="seg" role="group" aria-label="Page nav" id="segPageNav">
+              <button id="btnPagePrev" title="Página anterior">◀</button>
+              <button id="btnPageNext" title="Página siguiente">▶</button>
+            </div>
+            <button id="btnFullscreen" title="Pantalla completa">⛶</button>
+            <button id="btnBookmark" title="Añadir marcador">🔖</button>
+            <button id="btnNotes" title="Notas">📝</button>
+          </div>
+        </div>
+        <div class="viewer-body">
+          <div id="reader" class="reader scroll-mode" tabindex="0" role="document"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    // Base URL (file:// fallback)
+    const base = (location.protocol === 'file:') ? 'http://localhost:8000' : '';
+    const api = (p) => `${base}${p}`;
+
+    // i18n
+    const I18N = {
+      es: { appName: "The Archive", searchPlaceholder: "Buscar... (título o autor)", authorPlaceholder: "Autor", titlePlaceholder: "Título", genrePlaceholder: "Género", yearFromPlaceholder: "Año desde", yearToPlaceholder: "Año hasta", search: "Buscar", reindex: "Reindex", ready: "Listo.", searching: "Buscando...", done: "Hecho.", error: "Error", open: "Abrir", download: "Descargar", enrich: "Enriquecer", enrichAll: "Enriquecer todo", enrichNew: "Enriquecer nuevos", enriching: "Enriqueciendo...", enrichingAll: "Enriquecer en lote...", enriched: "Enriquecido", started: "Iniciado", progress: "Progreso", pageInfo: "Página {page} / {pages} • {total} resultados", tip: "Atajo:", tip2: "para buscar", reindexing: "Reindexando...", reindexed: "Reindex completo." },
+      en: { appName: "The Archive", searchPlaceholder: "Search... (title or author)", authorPlaceholder: "Author", titlePlaceholder: "Title", genrePlaceholder: "Genre", yearFromPlaceholder: "Year from", yearToPlaceholder: "Year to", search: "Search", reindex: "Reindex", ready: "Ready.", searching: "Searching...", done: "Done.", error: "Error", open: "Open", download: "Download", enrich: "Enrich", enrichAll: "Enrich all", enrichNew: "Enrich new", enriching: "Enriching...", enrichingAll: "Batch enriching...", enriched: "Enriched", started: "Started", progress: "Progress", pageInfo: "Page {page} / {pages} • {total} results", tip: "Tip:", tip2: "to search", reindexing: "Reindexing...", reindexed: "Reindex complete." },
+      fr: { appName: "The Archive", searchPlaceholder: "Rechercher... (titre ou auteur)", authorPlaceholder: "Auteur", titlePlaceholder: "Titre", genrePlaceholder: "Genre", yearFromPlaceholder: "Année min", yearToPlaceholder: "Année max", search: "Rechercher", reindex: "Réindexer", ready: "Prêt.", searching: "Recherche...", done: "Terminé.", error: "Erreur", open: "Ouvrir", download: "Télécharger", enrich: "Enrichir", enrichAll: "Tout enrichir", enrichNew: "Nouveaux", enriching: "Enrichissement...", enrichingAll: "Enrichissement par lot...", enriched: "Enrichi", started: "Démarré", progress: "Progression", pageInfo: "Page {page} / {pages} • {total} résultats", tip: "Astuce:", tip2: "pour rechercher", reindexing: "Réindexation...", reindexed: "Reindex complete." },
+      de: { appName: "The Archive", searchPlaceholder: "Suchen... (Titel oder Autor)", authorPlaceholder: "Autor", titlePlaceholder: "Titel", genrePlaceholder: "Genre", yearFromPlaceholder: "Jahr von", yearToPlaceholder: "Jahr bis", search: "Suchen", reindex: "Reindizieren", ready: "Bereit.", searching: "Suche...", done: "Fertig.", error: "Fehler", open: "Öffnen", download: "Herunterladen", enrich: "Anreichern", enrichAll: "Alle anreichern", enrichNew: "Neue anreichern", enriching: "Anreicherung...", enrichingAll: "Stapel-Anreicherung...", enriched: "Angereichert", started: "Gestartet", progress: "Fortschritt", pageInfo: "Seite {page} / {pages} • {total} Ergebnisse", tip: "Tipp:", tip2: "zum Suchen", reindexing: "Reindizierung...", reindexed: "Reindizierung abgeschlossen." },
+      pt: { appName: "The Archive", searchPlaceholder: "Pesquisar... (título ou autor)", authorPlaceholder: "Autor", titlePlaceholder: "Título", genrePlaceholder: "Gênero", yearFromPlaceholder: "Ano de", yearToPlaceholder: "Ano até", search: "Buscar", reindex: "Reindexar", ready: "Pronto.", searching: "Buscando...", done: "Concluído.", error: "Erro", open: "Abrir", download: "Baixar", enrich: "Enriquecer", enrichAll: "Enriquecer tudo", enrichNew: "Enriquecer novos", enriching: "Enriquecendo...", enrichingAll: "Enriquecimento em lote...", enriched: "Enriquecido", started: "Iniciado", progress: "Progresso", pageInfo: "Página {page} / {pages} • {total} resultados", tip: "Dica:", tip2: "para buscar", reindexing: "Reindexando...", reindexed: "Reindex concluído." }
+    };
+    let LANG = 'es'; const LANG_KEY = 'skald.lang';
+    function t(key, params){ params = params || {}; var d = I18N[LANG] || I18N.es; var s = (d[key] !== undefined) ? d[key] : (I18N.es[key] !== undefined ? I18N.es[key] : key); for (var k in params){ if (!Object.prototype.hasOwnProperty.call(params, k)) continue; var v = params[k]; // replace all occurrences without using replaceAll
+      s = s.split('{' + k + '}').join(v);
+    } return s; }
+    function applyI18n(){
+      document.documentElement.lang = LANG;
+      document.getElementById('lbl-app').textContent = t('appName');
+      document.getElementById('q').placeholder = t('searchPlaceholder');
+  // Visible labels
+  document.getElementById('lbl-author').textContent = t('authorPlaceholder');
+  document.getElementById('lbl-title').textContent = t('titlePlaceholder');
+  document.getElementById('lbl-genre').textContent = t('genrePlaceholder');
+  document.getElementById('lbl-year-from').textContent = t('yearFromPlaceholder');
+  document.getElementById('lbl-year-to').textContent = t('yearToPlaceholder');
+  // placeholders for selects are first options
+      document.getElementById('titulo').placeholder = t('titlePlaceholder');
+      // Guardar accesos que asumen existencia de un <select id="autor"> — en la UI moderna usamos input+datalist
+      const autorOpt = document.querySelector('#autor option');
+      if (autorOpt) autorOpt.textContent = t('authorPlaceholder');
+      const genreOpt = document.querySelector('#genre option');
+      if (genreOpt) genreOpt.textContent = t('genrePlaceholder');
+      document.getElementById('btnSearch').textContent = t('search');
+      document.getElementById('btnReindex').textContent = t('reindex');
+  document.getElementById('btnEnrichAll').textContent = t('enrichAll');
+  document.getElementById('btnEnrichNew').textContent = t('enrichNew');
+  document.getElementById('lbl-state').textContent = 'Estado';
+      document.getElementById('status').textContent = t('ready');
+      document.getElementById('lbl-tip').textContent = t('tip');
+      document.getElementById('lbl-tip2').textContent = t('tip2');
+      renderList({total: state.total, items: state.items, page: state.page, page_size: state.page_size});
+    }
+    function setLang(l){ if (!I18N[l]) return; LANG = l; localStorage.setItem(LANG_KEY, l); document.getElementById('lang').value = l; applyI18n(); }
+    function initLang(){ const saved = localStorage.getItem(LANG_KEY); const nav = (navigator.language || 'es').slice(0,2).toLowerCase(); setLang(saved || (I18N[nav] ? nav : 'es')); }
+
+    // Theme (dark/light/auto)
+    const THEME_KEY = 'skald.theme';
+    let mediaDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+    function setTheme(theme){
+      localStorage.setItem(THEME_KEY, theme);
+      const t = theme === 'auto' ? (mediaDark && mediaDark.matches ? 'dark' : 'light') : theme;
+      document.documentElement.setAttribute('data-theme', t);
+      // segmented state
+      document.getElementById('btn-theme-auto').classList.toggle('active', theme==='auto');
+      document.getElementById('btn-theme-light').classList.toggle('active', theme==='light');
+      document.getElementById('btn-theme-dark').classList.toggle('active', theme==='dark');
+      document.getElementById('btn-theme-auto').setAttribute('aria-pressed', theme==='auto');
+      document.getElementById('btn-theme-light').setAttribute('aria-pressed', theme==='light');
+      document.getElementById('btn-theme-dark').setAttribute('aria-pressed', theme==='dark');
+    }
+    function initTheme(){
+      const saved = localStorage.getItem(THEME_KEY) || 'auto';
+      setTheme(saved);
+      if (mediaDark) {
+        mediaDark.addEventListener ? mediaDark.addEventListener('change', () => {
+          if ((localStorage.getItem(THEME_KEY) || 'auto') === 'auto') setTheme('auto');
+        }) : mediaDark.addListener(() => { if ((localStorage.getItem(THEME_KEY) || 'auto') === 'auto') setTheme('auto'); });
+      }
+    }
+
+    // State
+    let state = { page: 1, page_size: 20, total: 0, items: [], lastQuery: {} };
+    let recentBooks = []; // Reading history
+    let recentSearches = []; // Search history
+    let batchMode = false;
+    let selectedBooks = new Set();
+    let bookmarks = {}; // bookId -> [positions]
+    let notes = {}; // bookId -> {position: note}
+    let customLists = {}; // listName -> [bookIds]
+
+    // Fetch helper
+    async function fetchJSON(url, opts={}) {
+      const res = await fetch(url, { ...opts });
+      if (!res.ok) throw new Error(await res.text());
+      const ct = res.headers.get('content-type') || '';
+      return ct.includes('application/json') ? res.json() : res.text();
+    }
+
+    // History management
+    function addToHistory(book) {
+      recentBooks = recentBooks.filter(b => b.id !== book.id);
+      recentBooks.unshift(book);
+      if (recentBooks.length > 10) recentBooks.pop();
+  localStorage.setItem('archive.history', JSON.stringify(recentBooks));
+    }
+    function loadHistory() {
+  try { recentBooks = JSON.parse(localStorage.getItem('archive.history') || '[]'); } catch {}
+    }
+    function saveSearch(query) {
+      if (!query.trim()) return;
+      recentSearches = recentSearches.filter(q => q !== query);
+      recentSearches.unshift(query);
+      if (recentSearches.length > 5) recentSearches.pop();
+  localStorage.setItem('archive.searches', JSON.stringify(recentSearches));
+    }
+    function loadSearchHistory() {
+  try { recentSearches = JSON.parse(localStorage.getItem('archive.searches') || '[]'); } catch {}
+    }
+    
+    // Bookmarks and notes
+    function loadBookmarks() {
+  try { bookmarks = JSON.parse(localStorage.getItem('archive.bookmarks') || '{}'); } catch {}
+    }
+    function saveBookmarks() {
+  localStorage.setItem('archive.bookmarks', JSON.stringify(bookmarks));
+    }
+    function loadNotes() {
+  try { notes = JSON.parse(localStorage.getItem('archive.notes') || '{}'); } catch {}
+    }
+    function saveNotes() {
+  localStorage.setItem('archive.notes', JSON.stringify(notes));
+    }
+    function addBookmark() {
+      if (!currentBookId) return;
+      const r = document.getElementById('reader');
+      const position = r ? r.scrollTop : 0;
+      if (!bookmarks[currentBookId]) bookmarks[currentBookId] = [];
+      bookmarks[currentBookId].push({ position, timestamp: Date.now(), page: readerPrefs.mode === 'paged' ? Math.floor(position / r.clientHeight) + 1 : null });
+      saveBookmarks();
+      showMessage('Marcador añadido', 'success');
+    }
+    function showNotes() {
+      if (!currentBookId) return;
+  // Non-blocking notes editor: show a small modal to add/edit a note
+  openNoteModal(currentBookId);
+    }
+
+  function openNoteModal(bookId){
+    if (!bookId) return;
+    let m = document.getElementById('noteModal');
+    if (!m){
+      m = document.createElement('div'); m.id = 'noteModal'; m.className = 'modal';
+      m.innerHTML = `
+        <div class="modal-dialog">
+          <header><h3>Nota</h3><button id="noteClose" class="btn ghost">✕</button></header>
+          <div class="modal-body"><textarea id="noteText" style="width:100%;height:120px"></textarea>
+            <div style="display:flex;gap:.5rem;margin-top:.5rem"><button id="noteSave" class="btn primary">Guardar</button><button id="noteCancel" class="btn ghost">Cancelar</button></div>
+          </div>
+        </div>`;
+      document.body.appendChild(m);
+      document.getElementById('noteClose').addEventListener('click', ()=> m.remove());
+      document.getElementById('noteCancel').addEventListener('click', ()=> m.remove());
+      document.getElementById('noteSave').addEventListener('click', ()=>{
+        const val = document.getElementById('noteText').value || '';
+        const r = document.getElementById('reader');
+        const position = r ? r.scrollTop : 0;
+        notes[bookId] = { note: val, position, timestamp: Date.now() };
+        saveNotes();
+        showMessage('Nota guardada', 'success');
+        m.remove();
+      });
+    }
+    // populate
+    document.getElementById('noteText').value = notes[bookId] && notes[bookId].note ? notes[bookId].note : '';
+    // show
+    // ensure modal exists in DOM; if recreated above it's already appended
+  }
+    
+    // Auto night mode
+    function checkAutoNightMode() {
+      const hour = new Date().getHours();
+      const isNight = hour < 7 || hour > 20;
+  const currentTheme = localStorage.getItem('archive.theme') || 'auto';
+      if (currentTheme === 'auto') {
+        document.documentElement.setAttribute('data-theme', isNight ? 'dark' : 'light');
+      }
+    }
+    
+    // Reading time estimation (words per minute)
+    function estimateReadingTime(bookId) {
+      // Simple estimation: average book ~70k words, average reading speed 200 WPM
+      const book = state.items.find(b => b.id === bookId);
+      if (!book) return null;
+      const estimatedWords = (book.size_bytes || 100000) / 5; // rough chars to words
+      const wordsPerMinute = 200;
+      const totalMinutes = estimatedWords / wordsPerMinute;
+      const progress = book.progress_percent || 0;
+      const remainingMinutes = totalMinutes * (1 - progress / 100);
+      const hours = Math.floor(remainingMinutes / 60);
+      const minutes = Math.floor(remainingMinutes % 60);
+      return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+    }
+
+    // Query builder
+    function buildQuery() {
+  const q = document.querySelector('#q').value.trim();
+  const autor = (document.querySelector('#autor_in') || { value: '' }).value.trim();
+      const titulo = document.querySelector('#titulo').value.trim();
+      const genre = document.querySelector('#genre').value.trim();
+  const year_from = document.querySelector('#year_from').value;
+  const year_to = document.querySelector('#year_to').value;
+    const stateFilter = document.querySelector('#state').value;
+    const viewMode = document.querySelector('#viewMode').value;
+    const sortBy = document.querySelector('#sortBy').value;
+    const groupBy = document.querySelector('#groupBy').value;
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (autor) params.set('autor', autor);
+      if (titulo) params.set('titulo', titulo);
+      if (genre) params.set('genre', genre);
+      if (year_from) params.set('year_from', year_from);
+      if (year_to) params.set('year_to', year_to);
+      if (stateFilter) params.set('state_filter', stateFilter);
+      if (sortBy) params.set('sort_by', sortBy);
+      params.set('page', state.page);
+      params.set('page_size', state.page_size);
+      return params.toString();
+    }    // Rendering
+    function escapeHtml(s){ return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+    
+    function sortBooks(books, sortBy) {
+      return [...books].sort((a, b) => {
+        switch (sortBy) {
+          case 'author': return a.author.localeCompare(b.author);
+          case 'year': return (b.year || 0) - (a.year || 0);
+          case 'added': return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+          case 'progress': return (b.progress_percent || 0) - (a.progress_percent || 0);
+          case 'genre': return (a.genre || '').localeCompare(b.genre || '');
+          default: return a.title.localeCompare(b.title);
+        }
+      });
+    }
+    
+    function groupBooks(books, groupBy) {
+      if (!groupBy) return { '': books };
+      const groups = {};
+      books.forEach(book => {
+        let key = '';
+        switch (groupBy) {
+          case 'author': key = book.author || 'Sin autor'; break;
+          case 'genre': key = book.genre || 'Sin género'; break;
+          case 'year': key = book.year ? String(book.year) : 'Sin año'; break;
+        }
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(book);
+      });
+      return groups;
+    }
+    
+    function renderList(data) {
+      state.total = data.total ?? 0; state.items = data.items || []; state.page = data.page ?? 1; state.page_size = data.page_size ?? 20;
+      const list = document.querySelector('#list');
+      const viewMode = document.querySelector('#viewMode').value;
+      const sortBy = document.querySelector('#sortBy').value;
+      const groupBy = document.querySelector('#groupBy').value;
+      
+      // Apply view mode class
+      const resultsEl = document.querySelector('#results');
+      resultsEl.classList.toggle('grid-view', viewMode === 'grid');
+      
+      // Sort and group
+      const sortedBooks = sortBooks(state.items, sortBy);
+      const groupedBooks = groupBooks(sortedBooks, groupBy);
+      
+      list.innerHTML = '';
+      
+      Object.keys(groupedBooks).forEach(groupKey => {
+        if (groupKey && groupBy) {
+          const header = document.createElement('div');
+          header.className = 'group-header';
+          header.textContent = groupKey;
+          list.appendChild(header);
+        }
+        
+  groupedBooks[groupKey].forEach(b => {
+          const div = document.createElement('div'); 
+          div.className = 'book';
+          div.style.cursor = 'pointer';
+          div.dataset.bookId = b.id;
+          div.dataset.enrichmentStatus = b.enrichment_status || 'none';
+          
+          const sizeKB = b.size_bytes ? Math.max(1, Math.round(b.size_bytes/1024)) : '';
+          const metaLine = [b.language, b.genre, (b.year || '')].filter(Boolean).join(' • ');
+          const progressPercent = b.progress_percent || 0;
+          const progressBar = progressPercent > 0 ? `<div class="progress-bar"><div class="progress-fill" style="width: ${progressPercent}%"></div></div>` : '';
+          const readingTime = estimateReadingTime(b.id);
+          const timeInfo = readingTime ? ` • ~${readingTime} restante` : '';
+          
+          const stateIcons = [];
+          if (b.favorite) stateIcons.push('<span class="state-icon" title="Favorito">★</span>');
+          if (b.read) stateIcons.push('<span class="state-icon" title="Leído">✓</span>');
+          if (b.pending) stateIcons.push('<span class="state-icon" title="Pendiente">⏳</span>');
+          if (bookmarks && bookmarks[b.id] && bookmarks[b.id].length) stateIcons.push('<span class="state-icon" title="Con marcadores">🔖</span>');
+          if (notes && notes[b.id] && notes[b.id].note) stateIcons.push('<span class="state-icon" title="Con notas">📝</span>');
+          
+          const enrichedTags = b.tags ? b.tags.slice(0,4).map(tag => `<span class="chip">${escapeHtml(tag)}</span>`).join('') : '';
+          
+          let checkbox = '';
+          if (batchMode) {
+            checkbox = `<input type="checkbox" class="book-checkbox" ${selectedBooks.has(b.id) ? 'checked' : ''} onchange="toggleBookSelection(${b.id})">`;
+          }
+          
+          const coverImg = `<img class="cover-img" src="${api(b.cover_url)}" alt="Portada" loading="lazy" onerror="this.style.display='none'">`;
+          if (viewMode === 'grid') {
+            div.innerHTML = `
+              ${checkbox}
+              <div class="book-cover">${coverImg}</div>
+              <h4>${escapeHtml(b.title)} ${stateIcons.join('')}</h4>
+              <div class="book-author">${escapeHtml(b.author)}</div>
+              ${metaLine ? `<div class="book-meta">${escapeHtml(metaLine)}</div>` : ''}
+              ${progressBar}
+              ${enrichedTags ? `<div class="chips">${enrichedTags}</div>` : ''}`;
+          } else {
+            // Calcular tamaño del archivo
+            const sizeText = sizeKB ? `${sizeKB} KB` : '';
+            const metaItems = [
+              b.language ? `<span class="meta-item">🌐 ${b.language}</span>` : '',
+              b.genre ? `<span class="meta-item">📚 ${b.genre}</span>` : '',
+              b.year ? `<span class="meta-item">📅 ${b.year}</span>` : '',
+              sizeText ? `<span class="meta-item">💾 ${sizeText}</span>` : '',
+              readingTime ? `<span class="meta-item">⏱️ ${readingTime} restante</span>` : ''
+            ].filter(Boolean);
+            
+            const enrichmentIcon = b.enrichment_status === 'ok' ? '✨' : 
+                                  b.enrichment_status === 'failed' ? '❌' : '⭕';
+            
+            div.innerHTML = `
+              ${checkbox}
+              <div class="book-header">
+                <div class="book-info">
+                  <h4>${escapeHtml(b.title)} ${stateIcons.join('')}</h4>
+                  <div class="book-author">👤 ${escapeHtml(b.author)}</div>
+                  ${metaItems.length ? `<div class="book-meta">${metaItems.join('<span class="meta-separator">•</span>')}</div>` : ''}
+                </div>
+                <div class="book-cover">${coverImg}</div>
+              </div>
+              ${progressBar}
+              ${enrichedTags ? `<div class="chips">${enrichedTags}</div>` : ''}
+              <div class="actions">
+                <a class="action primary" href="${api(`/download/${b.id}`)}" target="_blank" rel="noopener">
+                  <span class="action-icon">⬇️</span> ${t('download')}
+                </a>
+                <button class="action" data-enrich="${b.id}">
+                  <span class="action-icon">${enrichmentIcon}</span> ${t('enrich')}
+                </button>
+                <button class="action ghost" data-info="${b.id}">
+                  <span class="action-icon">ℹ️</span> Info
+                </button>
+              </div>`;
+          }
+          
+          // Click anywhere on card to open book (unless in batch mode)
+          if (!batchMode) {
+            div.addEventListener('click', () => openBook(b.id));
+          }
+          list.appendChild(div);
+        });
+      });
+      
+      document.querySelector('#pageinfo').textContent =
+        t('pageInfo', { page: state.page, pages: Math.max(1, Math.ceil(state.total/state.page_size)), total: state.total });
+    }
+
+  // Wrapper referenced in multiple places
+  async function performSearch() { return search(); }
+
+    // Batch Operations
+    function toggleBatchMode() {
+      batchMode = !batchMode;
+      selectedBooks.clear();
+      const batchBtn = document.querySelector('#btnBatchMode');
+      batchBtn.textContent = batchMode ? 'Salir del lote' : '☑️ Batch';
+      batchBtn.classList.toggle('active', batchMode);
+      document.body.classList.toggle('batch-mode', batchMode);
+      updateBatchToolbar();
+      performSearch(); // Re-render to show/hide checkboxes
+    }
+    
+    function toggleBookSelection(bookId) {
+      if (selectedBooks.has(bookId)) {
+        selectedBooks.delete(bookId);
+      } else {
+        selectedBooks.add(bookId);
+      }
+      updateBatchToolbar();
+    }
+    
+    function selectAllBooks() {
+      state.items.forEach(book => selectedBooks.add(book.id));
+      updateBatchToolbar();
+      document.querySelectorAll('.book-checkbox').forEach(cb => cb.checked = true);
+    }
+    
+    function clearSelection() {
+      selectedBooks.clear();
+      updateBatchToolbar();
+      document.querySelectorAll('.book-checkbox').forEach(cb => cb.checked = false);
+    }
+    
+    function updateBatchToolbar() {
+      const count = selectedBooks.size;
+      const countEl = document.querySelector('#batchCount');
+      if (countEl) countEl.textContent = `${count} seleccionados`;
+    }
+
+    async function setBookState(bookId, field, value) {
+      const payload = {}; payload[field] = value;
+      return fetchJSON(api(`/books/${bookId}/state`), {
+        method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(payload)
+      });
+    }
+    
+    async function batchMarkFavorite() {
+      if (selectedBooks.size === 0) return;
+      try {
+        for (let bookId of selectedBooks) {
+          await setBookState(bookId, 'favorite', true);
+        }
+        clearSelection();
+        await performSearch();
+        showMessage('Marcados como favoritos');
+      } catch (error) {
+        console.error('Batch favorite error:', error);
+        showMessage('Error al marcar favoritos', 'error');
+      }
+    }
+    
+    async function batchMarkRead() {
+      if (selectedBooks.size === 0) return;
+      try {
+        for (let bookId of selectedBooks) {
+          await setBookState(bookId, 'read', true);
+        }
+        clearSelection();
+        await performSearch();
+        showMessage('Marcados como leídos');
+      } catch (error) {
+        console.error('Batch read error:', error);
+        showMessage('Error al marcar leídos', 'error');
+      }
+    }
+    
+    // Reading Time Estimation
+    function estimateReadingTime(bookId) {
+      const book = state.items.find(b => b.id === bookId);
+      if (!book || !book.word_count) return null;
+      
+      const wordsPerMinute = 250; // Average reading speed
+      const totalMinutes = book.word_count / wordsPerMinute;
+      const progressPercent = book.progress_percent || 0;
+      const remainingMinutes = totalMinutes * (1 - progressPercent / 100);
+      
+      if (remainingMinutes < 60) return `${Math.round(remainingMinutes)}min`;
+      return `${Math.round(remainingMinutes / 60)}h`;
+    }
+    
+    // Auto Night Mode
+    function checkAutoNightMode() {
+      if (autoNightMode) {
+        const hour = new Date().getHours();
+        const shouldBeNight = hour < 7 || hour > 20;
+        if (shouldBeNight !== nightMode) {
+          toggleNightMode();
+        }
+      }
+    }
+    
+    function toggleNightMode() {
+      nightMode = !nightMode;
+      document.body.classList.toggle('night-mode', nightMode);
+      localStorage.setItem('nightMode', nightMode);
+    }
+    
+    // Bookmark Management
+    function addBookmark(bookId, position, note = '') {
+      if (!bookmarks[bookId]) bookmarks[bookId] = [];
+      const bookmark = {
+        id: Date.now(),
+        position,
+        note,
+        timestamp: new Date().toISOString()
+      };
+      bookmarks[bookId].push(bookmark);
+      saveBookmarks();
+      return bookmark.id;
+    }
+    
+    function removeBookmark(bookId, bookmarkId) {
+      if (!bookmarks[bookId]) return;
+      bookmarks[bookId] = bookmarks[bookId].filter(b => b.id !== bookmarkId);
+      saveBookmarks();
+    }
+    
+    function getBookmarks(bookId) {
+      return bookmarks[bookId] || [];
+    }
+    
+    function saveBookmarks() {
+      localStorage.setItem('bookmarks', JSON.stringify(bookmarks));
+    }
+    
+    function loadBookmarks() {
+      const saved = localStorage.getItem('bookmarks');
+      if (saved) {
+        try {
+          bookmarks = JSON.parse(saved);
+        } catch (error) {
+          console.error('Error loading bookmarks:', error);
+          bookmarks = {};
+        }
+      }
+    }
+    
+    // Notes Management
+    function setNote(bookId, note) {
+      if (!notes[bookId]) notes[bookId] = {};
+      notes[bookId].note = note;
+      notes[bookId].timestamp = new Date().toISOString();
+      saveNotes();
+    }
+    
+    function getNote(bookId) {
+      return notes[bookId]?.note || '';
+    }
+    
+    function saveNotes() {
+      localStorage.setItem('notes', JSON.stringify(notes));
+    }
+    
+    function loadNotes() {
+      const saved = localStorage.getItem('notes');
+      if (saved) {
+        try {
+          notes = JSON.parse(saved);
+        } catch (error) {
+          console.error('Error loading notes:', error);
+          notes = {};
+        }
+      }
+    }
+
+    // Messages and notifications
+    function showMessage(message, type = 'info') {
+      // Create message element if it doesn't exist
+      let messageEl = document.querySelector('#message-toast');
+      if (!messageEl) {
+        messageEl = document.createElement('div');
+        messageEl.id = 'message-toast';
+        messageEl.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: var(--panel-solid);
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          padding: 1rem 1.5rem;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+          z-index: 1000;
+          transform: translateX(400px);
+          transition: transform 0.3s ease;
+          max-width: 300px;
+        `;
+        document.body.appendChild(messageEl);
+      }
+      
+      // Set message and type
+      messageEl.textContent = message;
+      messageEl.className = `message-${type}`;
+      
+      // Add type-specific styling
+      if (type === 'success') {
+        messageEl.style.borderColor = '#34c759';
+        messageEl.style.color = '#34c759';
+      } else if (type === 'error') {
+        messageEl.style.borderColor = '#ff3b30';
+        messageEl.style.color = '#ff3b30';
+      } else {
+        messageEl.style.borderColor = 'var(--accent)';
+        messageEl.style.color = 'var(--fg)';
+      }
+      
+      // Show message
+      messageEl.style.transform = 'translateX(0)';
+      
+      // Hide after 3 seconds
+      setTimeout(() => {
+        messageEl.style.transform = 'translateX(400px)';
+      }, 3000);
+    }
+
+    // Interactions
+    function setStatus(text) { document.querySelector('#status').textContent = text; }
+    async function search() {
+      const qs = buildQuery(); const url = api(`/books?${qs}`);
+      setStatus(t('searching'));
+      try { const data = await fetchJSON(url); renderList(data); setStatus(t('done')); }
+      catch (e) { console.error(e); setStatus(`${t('error')}: ${e.message}`); }
+    }
+    async function openBook(id) {
+        currentBookId = String(id);
+      const reader = document.querySelector('#reader');
+      setReaderHTML('<div class="meta">Cargando…</div>');
+        try { const html = await fetchJSON(api(`/open/${id}`)); setReaderHTML(html); applyReaderPrefs(); } catch(e) { setReaderHTML(`<pre>${(e && e.message) || 'Error'}</pre>`); }
+        try {
+          const detail = await fetchJSON(api(`/books/${id}`));
+          document.querySelector('#detail').textContent = `${detail.title} — ${detail.author}`;
+          // Reset page info suffix for new book
+          lastDetailBase = `${detail.title} — ${detail.author}`;
+          updatePageInfo(true);
+          // Update state toggles
+          updateStateToggles(detail);
+        } catch {}
+        // Restore last position from server
+        await restoreProgressServer();
+      if (window.innerWidth < 1100) document.querySelector('.viewer').scrollIntoView({ behavior:'smooth', block:'start' });
+    }
+    async function enrich(id) {
+      setStatus(t('enriching'));
+      console.log('Enriching book ID:', id);
+      
+      // Encontrar la ficha del libro y añadir clase de carga
+      const bookCard = document.querySelector(`[data-book-id="${id}"]`);
+      if (bookCard) {
+        bookCard.classList.add('enriching');
+      }
+      
+      try { 
+        const res = await fetchJSON(api(`/enrich/${id}`), { method: 'POST' }); 
+        console.log('Enrich response:', res);
+        setStatus(`${t('enriched')}: ${res.status ?? 'ok'}`); 
+        await performSearch(); // Usar performSearch en lugar de search
+        showMessage('Libro enriquecido correctamente', 'success');
+      } catch(e) { 
+        console.error('Enrich error:', e);
+        setStatus(`${t('error')}: ${e.message}`); 
+        showMessage(`Error al enriquecer: ${e.message}`, 'error');
+      } finally {
+        // Remover clase de carga
+        if (bookCard) {
+          bookCard.classList.remove('enriching');
+        }
+      }
+    }
+
+    // Enrich All / New
+    let enrichPoll = null;
+    async function pollEnrichStatus() {
+      try {
+        const s = await fetchJSON(api('/enrich/status'));
+        if (s && s.running) {
+          const total = s.total ?? 0, processed = s.processed ?? 0, ok = s.updated ?? 0, failed = s.failed ?? 0;
+          setStatus(`${t('enrichingAll')} ${processed}/${total} • ok:${ok} • x:${failed}`);
+        } else {
+          if (s && s.total != null) {
+            const total = s.total ?? 0, processed = s.processed ?? 0, ok = s.updated ?? 0, failed = s.failed ?? 0;
+            setStatus(`${t('done')} • ${processed}/${total} • ok:${ok} • x:${failed}`);
+          } else {
+            setStatus(t('done'));
+          }
+          if (enrichPoll) { clearInterval(enrichPoll); enrichPoll = null; }
+          await search();
+        }
+      } catch (e) { /* ignore transient errors */ }
+    }
+    async function enrichAll(opts) {
+      setStatus(t('enrichingAll'));
+      try {
+        const res = await fetchJSON(api('/enrich/all'), {
+          method: 'POST', headers: {'content-type':'application/json'},
+          body: JSON.stringify({ only_pending: true, throttle_ms: 250, ...opts })
+        });
+        if (res && res.status === 'started') {
+          setStatus(`${t('started')} • ${t('enrichingAll')}`);
+          if (!enrichPoll) enrichPoll = setInterval(pollEnrichStatus, 30000); // 30 segundos
+        } else if (res && res.status === 'already_running') {
+          if (!enrichPoll) enrichPoll = setInterval(pollEnrichStatus, 30000); // 30 segundos
+        } else {
+          setStatus(t('done'));
+        }
+      } catch (e) {
+        setStatus(`${t('error')}: ${e.message}`);
+      }
+    }
+
+    // Events
+    document.getElementById('btnSearch').addEventListener('click', () => { state.page = 1; const q = document.querySelector('#q').value.trim(); if (q) saveSearch(q); search(); });
+    // Mobile filters toggle: collapse/expand the filters row to reveal results on small screens
+    const filtersEl = document.querySelector('.wrap.filters');
+    const btnToggleFilters = document.getElementById('btnToggleFilters');
+    const FILTERS_KEY = 'archive.filters.collapsed';
+    function applyFiltersCollapsed(collapsed){
+      if (!filtersEl) return;
+      filtersEl.classList.toggle('collapsed', !!collapsed);
+      if (btnToggleFilters) {
+        btnToggleFilters.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      }
+    }
+    if (btnToggleFilters){
+      btnToggleFilters.addEventListener('click', ()=>{
+        const cur = localStorage.getItem(FILTERS_KEY) === '1';
+        const next = !cur;
+        localStorage.setItem(FILTERS_KEY, next ? '1' : '0');
+        applyFiltersCollapsed(next);
+        // if filters hidden, ensure results are shown (use results-hidden semantics inverted on small screens)
+        if (next && document.body.classList.contains('results-hidden')) document.body.classList.remove('results-hidden');
+      });
+      // apply saved state on load
+      const saved = localStorage.getItem(FILTERS_KEY) === '1';
+      applyFiltersCollapsed(saved);
+    }
+    document.getElementById('prev').addEventListener('click', () => { if (state.page>1){ state.page--; search(); }});
+    document.getElementById('next').addEventListener('click', () => { const max = Math.ceil(state.total/state.page_size); if (state.page<max){ state.page++; search(); }});
+    document.getElementById('btnReindex').addEventListener('click', async () => {
+      setStatus(t('reindexing'));
+      try { await fetchJSON(api('/reindex'), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({mode:'sync'}) });
+        setStatus(t('reindexed')); search();
+      } catch(e){ setStatus(`${t('error')}: ${e.message}`); }
+    });
+    document.getElementById('btnEnrichAll').addEventListener('click', async () => {
+      enrichAll({ only_pending: true });
+    });
+    document.getElementById('btnEnrichNew').addEventListener('click', async () => {
+      enrichAll({ only_never: true });
+    });
+    document.addEventListener('click', async (e) => {
+      // Batch mode button
+      if (e.target.id === 'btnBatchMode') {
+        toggleBatchMode();
+        return;
+      }
+      
+      // Batch operations
+      if (e.target.id === 'btnBatchCancel') {
+        toggleBatchMode();
+        return;
+      }
+
+      if (e.target.id === 'btnBatchDelete') {
+        clearSelection();
+        return;
+      }
+
+      if (e.target.id === 'selectAllBtn') {
+        selectAllBooks();
+        return;
+      }
+      
+      if (e.target.id === 'clearSelectionBtn') {
+        clearSelection();
+        return;
+      }
+      
+      if (e.target.id === 'batchFavoriteBtn' || e.target.id === 'btnBatchFavorite') {
+        await batchMarkFavorite();
+        return;
+      }
+      
+      if (e.target.id === 'batchReadBtn' || e.target.id === 'btnBatchRead') {
+        await batchMarkRead();
+        return;
+      }
+      
+      // Book actions - buscar el elemento más cercano con data attributes o enlaces de descarga
+      const target = e.target.closest('button[data-enrich], button[data-info], a.action');
+      if (target) {
+        e.stopPropagation();
+        e.preventDefault();
+        
+        console.log('Action clicked:', target);
+        
+        if (target.dataset.enrich) {
+          console.log('Enriching book ID:', target.dataset.enrich);
+          await enrich(parseInt(target.dataset.enrich));
+        } else if (target.dataset.info) {
+          console.log('Showing info for book ID:', target.dataset.info);
+          await showBookInfo(parseInt(target.dataset.info));
+        } else if (target.matches('a.action')) {
+          // Para enlaces de descarga, permitir el comportamiento normal
+          e.stopPropagation();
+          // No preventDefault() para permitir la descarga
+          window.open(target.href, '_blank', 'noopener');
+          return;
+        }
+        return;
+      }
+    });
+    document.addEventListener('keydown', (e)=>{
+  var _active = (document.activeElement && document.activeElement.tagName) ? document.activeElement.tagName : null;
+  if (['INPUT', 'SELECT'].indexOf(_active) !== -1) {
+        if (e.key === 'Enter') { e.preventDefault(); state.page = 1; const q = document.querySelector('#q').value.trim(); if (q) saveSearch(q); search(); }
+        return;
+      }
+      // Global shortcuts
+      if (e.key === ' ') { e.preventDefault(); const r = document.getElementById('reader'); if (r) r.scrollBy(0, r.clientHeight * 0.8); }
+      if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
+      if (readerPrefs.mode==='paged' && ['ArrowRight','PageDown'].includes(e.key)) { e.preventDefault(); pageNext(); }
+      if (readerPrefs.mode==='paged' && ['ArrowLeft','PageUp'].includes(e.key)) { e.preventDefault(); pagePrev(); }
+    });
+
+    // Theme + language init
+    document.getElementById('btn-theme-auto').addEventListener('click', ()=>setTheme('auto'));
+    document.getElementById('btn-theme-light').addEventListener('click', ()=>setTheme('light'));
+    document.getElementById('btn-theme-dark').addEventListener('click', ()=>setTheme('dark'));
+    document.getElementById('lang').addEventListener('change', (e)=> setLang(e.target.value));
+
+    initTheme();
+    initLang();
+    applyI18n();
+    // Load filters then search (wrap async work to avoid top-level await)
+    (async () => {
+      try {
+        const filters = await fetchJSON(api('/filters'));
+        // Authors datalist / legacy select handling
+        const selAutor = document.getElementById('autor');
+        if (selAutor && Array.isArray(filters.authors)) {
+          selAutor.innerHTML = `<option value="">${t('authorPlaceholder')}</option>` + filters.authors.map(a=>`<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
+        } else {
+          // Preload the datalist with a small subset so users see suggestions immediately (max 50).
+          const autorList = document.getElementById('autor_list');
+          if (autorList && Array.isArray(filters.authors) && filters.authors.length) {
+            autorList.innerHTML = filters.authors.slice(0, 50).map(a=>`<option value="${escapeHtml(a)}"></option>`).join('');
+          }
+        }
+        // Populate genres from master `Genre` table returned by /filters
+        const selGenre = document.getElementById('genre');
+        if (selGenre) {
+          const genres = Array.isArray(filters.genres) ? filters.genres : [];
+          selGenre.innerHTML = `<option value="">${t('genrePlaceholder')}</option>` + genres.map(g=>`<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+        }
+        const selFrom = document.getElementById('year_from');
+        const selTo = document.getElementById('year_to');
+        const minY = filters.min_year ?? '';
+        const curY = filters.current_year ?? new Date().getFullYear();
+        let years = [];
+        if (minY) { for (let y=curY; y>=minY; y--) years.push(y); }
+        else { for (let y=curY; y>=1900; y--) years.push(y); }
+        // Default empty options hinting the range, but with empty value to avoid filtering by default
+        selFrom.innerHTML = `<option value="">${t('yearFromPlaceholder')}${minY?': '+minY:''}</option>` + years.slice().reverse().map(y=>`<option value="${y}">${y}</option>`).join('');
+        selTo.innerHTML = `<option value="">${t('yearToPlaceholder')}${curY?': '+curY:''}</option>` + years.map(y=>`<option value="${y}">${y}</option>`).join('');
+        selFrom.value = '';
+        selTo.value = '';
+      } catch(e) { /* ignore */ }
+      // Autor lookup: replace huge select with incremental search (3+ chars)
+      const autorIn = document.getElementById('autor_in');
+      const autorList = document.getElementById('autor_list');
+      function debounce(fn, wait){ let t; return function(...a){ clearTimeout(t); t = setTimeout(()=>fn.apply(this,a), wait); }; }
+      async function fetchAuthors(q){
+        const tq = String(q || '').trim();
+        if(!tq || tq.length < 3){ 
+          // show a lightweight hint so mobile users understand the requirement
+          if (autorList) autorList.innerHTML = `<option value="">${t('authorPlaceholder')} — escribe 3+ letras</option>`;
+          return; 
+        }
+        try{
+          const res = await fetchJSON(api(`/authors?q=${encodeURIComponent(tq)}&limit=50`));
+          autorList.innerHTML = (res||[]).map(a=>`<option value="${escapeHtml(a)}"></option>`).join('');
+        }catch(e){ autorList.innerHTML = ''; }
+      }
+      if(autorIn){ autorIn.addEventListener('input', debounce(e=>fetchAuthors(e.target.value), 300)); }
+      else {
+        console.warn('autor_in input not found; author incremental search disabled');
+      }
+      // Always perform an initial search
+      search();
+      // Render history after initial load
+      renderHistory();
+    })();
+
+  // -------- Reader controls --------
+  const READER_PREFS_KEY = 'archive.reader';
+  let readerPrefs = { mode: 'scroll', fontSize: 1.0, family: 'serif', lineHeight: 1.6, padding: 1.25 };
+  let lastDetailBase = '—';
+  let currentBookId = null;
+  // Server-side progress
+  async function getProgressServer(){ if (!currentBookId) return null; try { return await fetchJSON(api('/books/' + currentBookId + '/progress')); } catch (e) { return null; } }
+  async function setProgressServer(payload){ if (!currentBookId) return; try { await fetchJSON(api('/books/' + currentBookId + '/progress'), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) }); } catch (e) {} }
+  function loadReaderPrefs(){ try { const s = JSON.parse(localStorage.getItem(READER_PREFS_KEY) || '{}'); readerPrefs = { ...readerPrefs, ...s }; } catch{} }
+  function saveReaderPrefs(){ localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs)); }
+  function applyReaderPrefs(){
+    const r = document.getElementById('reader'); if (!r) return;
+    r.style.setProperty('--reader-font-size', `${readerPrefs.fontSize}rem`);
+    r.style.setProperty('--reader-line-height', String(readerPrefs.lineHeight));
+    r.style.setProperty('--reader-family', readerPrefs.family);
+    r.style.setProperty('--reader-padding', `${readerPrefs.padding}rem`);
+    r.classList.toggle('page-mode', readerPrefs.mode==='paged');
+    r.classList.toggle('scroll-mode', readerPrefs.mode!=='paged');
+    // Show/hide page nav segment depending on mode
+    const seg = document.getElementById('segPageNav');
+    if (seg) seg.style.display = readerPrefs.mode==='paged' ? 'flex' : 'none';
+    document.getElementById('btnModeScroll').classList.toggle('active', readerPrefs.mode!=='paged');
+    document.getElementById('btnModePaged').classList.toggle('active', readerPrefs.mode==='paged');
+  // Try to restore approximate position after visual changes
+  // Try to restore approximate position after visual changes
+  restoreProgressServer();
+  updatePageInfo(true);
+  }
+  function sanitizeReaderHTML(html){
+    // Create a template to parse the HTML and sanitize DOM nodes
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html || '';
+    const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_ELEMENT, null, false);
+    const forbiddenStyles = ['position','z-index','transform','left','top','right','bottom'];
+    const removeTags = new Set(['IFRAME','EMBED','OBJECT','SCRIPT','STYLE']);
+    let node = walker.nextNode();
+    while(node){
+      // remove entirely forbidden tags
+      if(removeTags.has(node.tagName)){
+        const toRemove = node;
+        node = walker.nextNode();
+        toRemove.remove();
+        continue;
+      }
+      // strip dangerous inline styles
+      if(node.hasAttribute && node.hasAttribute('style')){
+        const style = node.getAttribute('style') || '';
+        const parts = style.split(';').map(s=>s.trim()).filter(Boolean);
+        const keep = [];
+        for(const p of parts){
+          const key = p.split(':')[0].trim().toLowerCase();
+          if(!forbiddenStyles.includes(key)) keep.push(p);
+        }
+        if(keep.length) node.setAttribute('style', keep.join('; ')); else node.removeAttribute('style');
+      }
+      // normalize images
+      if(node.tagName === 'IMG'){
+        node.style.maxWidth = '100%'; node.style.height = 'auto';
+      }
+      node = walker.nextNode();
+    }
+    return tpl.innerHTML;
+  }
+
+  function setReaderHTML(html){
+    const r = document.getElementById('reader'); if (!r) return;
+    try{
+      const simplified = localStorage.getItem('archive.reader.simplify') === '1';
+      const out = simplified ? sanitizeReaderHTML(html) : sanitizeReaderHTML(html); // future: different modes
+      r.innerHTML = out;
+    }catch(e){
+      // fallback: direct inject if sanitizer fails
+      r.innerHTML = html;
+    }
+    r.scrollTop = 0; updatePageInfo();
+  }
+  function pageNext(){ const r = document.getElementById('reader'); if (!r) return; const delta = r.clientHeight; r.scrollBy({ top: delta, behavior: 'smooth' }); setTimeout(updatePageInfo, 200); }
+  function pagePrev(){ const r = document.getElementById('reader'); if (!r) return; const delta = r.clientHeight; r.scrollBy({ top: -delta, behavior: 'smooth' }); setTimeout(updatePageInfo, 200); }
+  function updatePageInfo(reset=false){
+    const r = document.getElementById('reader'); if (!r) return;
+    const base = lastDetailBase || document.getElementById('detail').textContent.replace(/\s*•\s*Página\s+\d+\/\d+$/, '');
+    if (readerPrefs.mode !== 'paged') { document.getElementById('detail').textContent = base; return; }
+    const total = Math.max(1, Math.ceil(r.scrollHeight / r.clientHeight));
+    const current = Math.min(total, Math.max(1, Math.floor(r.scrollTop / r.clientHeight) + 1));
+    document.getElementById('detail').textContent = `${base} • Página ${current}/${total}`;
+  }
+  async function captureProgress(){
+    if (!currentBookId) return;
+    const r = document.getElementById('reader'); if (!r) return;
+    const maxScroll = Math.max(1, r.scrollHeight - r.clientHeight);
+    const percent = Math.max(0, Math.min(1, r.scrollTop / maxScroll));
+    if (readerPrefs.mode === 'paged') {
+      const total = Math.max(1, Math.ceil(r.scrollHeight / r.clientHeight));
+      const current = Math.min(total, Math.max(1, Math.floor(r.scrollTop / r.clientHeight) + 1));
+      await setProgressServer({ mode: 'paged', page: current, percent });
+    } else {
+      await setProgressServer({ mode: 'scroll', scroll_top: r.scrollTop, percent });
+    }
+  }
+  async function restoreProgressServer(){
+    if (!currentBookId) return;
+    const r = document.getElementById('reader'); if (!r) return;
+    const p = await getProgressServer();
+    if (!p) return;
+    if (readerPrefs.mode === 'paged' && p.page) {
+      const page = Math.max(1, p.page|0);
+      r.scrollTop = (page - 1) * r.clientHeight;
+    } else if (readerPrefs.mode !== 'paged' && (typeof p.scroll_top === 'number' || typeof p.percent === 'number')) {
+      const maxScroll = Math.max(0, r.scrollHeight - r.clientHeight);
+      let target = typeof p.scroll_top === 'number' ? p.scroll_top : Math.round((p.percent || 0) * maxScroll);
+      target = Math.max(0, Math.min(maxScroll, target));
+      r.scrollTop = target;
+    }
+    updatePageInfo(true);
+  }
+  // Fullscreen toggle
+  function toggleFullscreen(){
+    const el = document.getElementById('viewerPanel');
+    if (!document.fullscreenElement) {
+      if (el.requestFullscreen) el.requestFullscreen(); else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } else {
+      if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
+  }
+  
+  // Book info modal
+  function showBookInfo(bookId) {
+    // Simple implementation - could be enhanced with a proper modal
+    fetchJSON(api(`/books/${bookId}`)).then(book => {
+      const enriched = book.enriched || {};
+  var premise = 'Sin descripción disponible';
+  try { if (enriched && enriched.premise) premise = enriched.premise; else if (enriched && enriched.localized && enriched.localized.es && enriched.localized.es.premise) premise = enriched.localized.es.premise; } catch(e){}
+  var tags = 'Sin etiquetas';
+  try { if (enriched && enriched.tags && enriched.tags.join) tags = enriched.tags.join(', '); } catch(e){}
+      const info = `
+Título: ${book.title}
+Autor: ${book.author}
+Idioma: ${book.language || 'N/A'}
+Género: ${book.genre || 'N/A'}
+Año: ${book.year || 'N/A'}
+Estado: ${book.read ? 'Leído' : book.pending ? 'Pendiente' : book.favorite ? 'Favorito' : 'Sin marcar'}
+
+Descripción: ${premise}
+
+Etiquetas: ${tags}
+Fuente: ${enriched.enriched_by === 'openlibrary' ? 'Open Library' : 'N/A'}
+Valoración: ${enriched.ratings_average || 'N/A'}
+      `.trim();
+  showMessage(info, 'info'); // show book info in toast instead of alert
+  }).catch(() => showMessage('Error al cargar información del libro', 'error'));
+  }
+  
+  // -------- Settings modal (friendly UI) --------
+  async function openSettingsModal(){
+    // Create modal shell if missing
+    let modal = document.getElementById('settingsModal');
+    if (!modal){
+      modal = document.createElement('div'); modal.id = 'settingsModal'; modal.className = 'modal';
+      modal.innerHTML = `
+        <div class="modal-dialog">
+          <header>
+            <h3>Configuración</h3>
+            <button id="settingsClose" class="btn ghost">✕</button>
+          </header>
+          <div class="modal-body">
+            <form id="settingsForm">
+              <label>Ruta biblioteca <input name="library_path" /></label>
+              <label>Base de datos <input name="db_path" /></label>
+              <label>Proveedor de metadatos
+                <select name="metadata_provider"><option value="openlibrary">Open Library (gratis, sin clave)</option></select>
+              </label>
+              <label>API de metadatos <input name="metadata_api_url" /></label>
+              <label>Tiempo de espera (segundos) <input type="number" name="metadata_timeout_seconds" min="2" max="120" step="1" /></label>
+              <label>Coincidencia mínima <input type="number" name="metadata_min_match_score" min="0" max="1" step="0.05" /></label>
+              <label>Pausa entre consultas (ms) <input type="number" name="metadata_throttle_ms" min="0" step="100" /></label>
+              <hr />
+              <div style="display:flex;gap:.5rem;align-items:center;">
+                <button type="button" id="saveSettings" class="btn primary">Guardar</button>
+                <button type="button" id="toggleRawJson" class="btn">Mostrar JSON</button>
+                <button type="button" id="resetDefaults" class="btn ghost">Reset</button>
+                <div class="spacer"></div>
+              </div>
+              <pre id="settingsRaw" style="display:none;max-height:300px;overflow:auto;background:var(--panel);padding:.5rem;border:1px solid var(--line);"></pre>
+            </form>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      // Styles for modal (minimal)
+      const css = document.createElement('style'); css.textContent = `
+        /* Modal: simplified for e-readers and small screens */
+        .modal{position:fixed;inset:0;background:rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;z-index:9999}
+        .modal-dialog{width:720px;max-width:95%;background:var(--bg);border:1px solid var(--line);padding:1rem;border-radius:.5rem}
+        .modal-dialog header{display:flex;align-items:center}
+        .modal-dialog header h3{margin:0;flex:1}
+        .modal-dialog label{display:block;margin:.5rem 0}
+        @media (max-width:600px){
+          .modal{align-items:flex-end;background:rgba(0,0,0,.08);} /* less intrusive */
+          .modal-dialog{border-radius:12px 12px 0 0;width:100%;max-width:100%;padding:.75rem;}
+          .modal-dialog label{font-size:.95rem}
+        }
+        @media (forced-colors: active), (prefers-reduced-transparency: reduce){
+          .modal{background:transparent}
+          .modal-dialog{border:1px solid CanvasText}
+        }
+      `; document.head.appendChild(css);
+      document.getElementById('settingsClose').addEventListener('click', ()=> modal.remove());
+      document.getElementById('toggleRawJson').addEventListener('click', ()=>{
+        const raw = document.getElementById('settingsRaw'); raw.style.display = raw.style.display==='none' ? 'block' : 'none';
+      });
+      document.getElementById('saveSettings').addEventListener('click', saveSettings);
+      document.getElementById('resetDefaults').addEventListener('click', async ()=>{
+        // reload remote config
+        await loadAndPopulateConfig(true);
+      });
+    }
+    await loadAndPopulateConfig();
+  }
+
+  async function loadAndPopulateConfig(reset=false){
+    try{
+      const res = await fetchJSON(api('/api/config'));
+      const form = document.getElementById('settingsForm');
+      if (!form) return;
+      // basic fields
+      form.library_path.value = res.library_path || '';
+      form.db_path.value = res.db_path || '';
+      form.metadata_provider.value = res.metadata_provider || 'openlibrary';
+      form.metadata_api_url.value = res.metadata_api_url || 'https://openlibrary.org/search.json';
+      form.metadata_timeout_seconds.value = res.metadata_timeout_seconds || 20;
+      form.metadata_min_match_score.value = res.metadata_min_match_score ?? 0.55;
+      form.metadata_throttle_ms.value = res.metadata_throttle_ms ?? 1100;
+      const raw = document.getElementById('settingsRaw'); raw.textContent = JSON.stringify(res, null, 2);
+  }catch(e){ showMessage('Error cargando config: '+((e && e.message) ? e.message : String(e)), 'error'); }
+  }
+
+  async function saveSettings(){
+    const form = document.getElementById('settingsForm');
+    if (!form) return;
+    const payload = {};
+    payload.library_path = form.library_path.value;
+    payload.db_path = form.db_path.value;
+    payload.metadata_provider = form.metadata_provider.value;
+    payload.metadata_api_url = form.metadata_api_url.value;
+    payload.metadata_timeout_seconds = Number(form.metadata_timeout_seconds.value) || 20;
+    payload.metadata_min_match_score = Number(form.metadata_min_match_score.value);
+    payload.metadata_throttle_ms = Number(form.metadata_throttle_ms.value) || 0;
+    try{
+      const res = await fetchJSON(api('/api/config'), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) });
+  showMessage('Configuración guardada. Recargando...', 'success');
+  setTimeout(()=> location.reload(), 800);
+  }catch(e){ showMessage('Error guardando: '+((e && e.message) ? e.message : String(e)), 'error'); }
+  }
+  // History breadcrumbs
+  function renderHistory() {
+    const header = document.querySelector('.wrap.nav');
+    let historyDiv = document.getElementById('historyDiv');
+    if (!historyDiv && recentBooks.length > 0) {
+      historyDiv = document.createElement('div');
+      historyDiv.id = 'historyDiv';
+      historyDiv.className = 'history';
+      historyDiv.innerHTML = '<span style="font-size: .75rem; color: var(--muted);">Reciente:</span>';
+      header.appendChild(historyDiv);
+    }
+    if (historyDiv && recentBooks.length === 0) {
+      historyDiv.remove();
+      return;
+    }
+    if (historyDiv) {
+      const items = recentBooks.slice(0, 5).map(book => 
+        `<span class="history-item" onclick="openBook(${book.id})">${book.title}</span>`
+      ).join('');
+      historyDiv.innerHTML = `<span style="font-size: .75rem; color: var(--muted);">Reciente:</span> ${items}`;
+    }
+  }
+  // Buttons
+  document.getElementById('btnModeScroll').addEventListener('click', ()=>{ readerPrefs.mode='scroll'; saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('btnModePaged').addEventListener('click', ()=>{ readerPrefs.mode='paged'; saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('btnFontPlus').addEventListener('click', ()=>{ readerPrefs.fontSize = Math.min(2.0, +(readerPrefs.fontSize + 0.1).toFixed(2)); saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('btnFontMinus').addEventListener('click', ()=>{ readerPrefs.fontSize = Math.max(0.7, +(readerPrefs.fontSize - 0.1).toFixed(2)); saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('fontFamily').addEventListener('change', (e)=>{ readerPrefs.family = e.target.value; saveReaderPrefs(); applyReaderPrefs(); });
+  document.getElementById('btnPageNext').addEventListener('click', pageNext);
+  document.getElementById('btnPagePrev').addEventListener('click', pagePrev);
+  document.getElementById('btnFullscreen').addEventListener('click', toggleFullscreen);
+  document.getElementById('btnBookmark').addEventListener('click', ()=>{
+    if (!currentBookId) return;
+    const reader = document.getElementById('reader');
+    addBookmark(currentBookId, reader ? reader.scrollTop : 0);
+    showMessage('Marcador añadido', 'success');
+  });
+  document.getElementById('btnNotes').addEventListener('click', showNotes);
+  document.getElementById('reader').addEventListener('scroll', ()=>{ captureProgress(); if (readerPrefs.mode==='paged') updatePageInfo(); });
+  // Disable wheel scroll in paged mode, use it for page navigation
+  document.getElementById('reader').addEventListener('wheel', (e)=>{
+    if (readerPrefs.mode==='paged') { e.preventDefault(); if (e.deltaY > 0) pageNext(); else if (e.deltaY < 0) pagePrev(); }
+  }, { passive: false });
+  document.addEventListener('keydown', (e)=>{ if (readerPrefs.mode==='paged' && ['ArrowRight','PageDown'].includes(e.key)) { e.preventDefault(); pageNext(); } if (readerPrefs.mode==='paged' && ['ArrowLeft','PageUp'].includes(e.key)) { e.preventDefault(); pagePrev(); } });
+  // Double click for fullscreen
+  document.getElementById('reader').addEventListener('dblclick', toggleFullscreen);
+  
+  loadReaderPrefs(); applyReaderPrefs();
+  loadHistory(); loadSearchHistory();
+
+  // Settings modal wiring
+  document.getElementById('openSettingsInline').addEventListener('click', async ()=>{
+    await openSettingsModal();
+  });
+
+  // ---------- State toggles (favorite/read/pending) ----------
+  async function updateStateToggles(detail){
+    const bar = document.querySelector('.controls-row');
+    let group = document.getElementById('stateGroup');
+    if (!group) {
+      group = document.createElement('div'); group.className = 'seg'; group.id = 'stateGroup'; group.setAttribute('role','group'); group.setAttribute('aria-label','Estado');
+      group.innerHTML = `
+        <button id="btnFav" title="Favorito">★</button>
+        <button id="btnRead" title="Leído">✔</button>
+        <button id="btnPending" title="Pendiente">⏳</button>
+      `;
+      bar.appendChild(group);
+      document.getElementById('btnFav').addEventListener('click', async ()=>{ if (!currentBookId) return; const cur = group.classList.contains('is-fav'); await fetchJSON(api(`/books/${currentBookId}/state`), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ favorite: !cur }) }); group.classList.toggle('is-fav', !cur); await search(); });
+      document.getElementById('btnRead').addEventListener('click', async ()=>{ if (!currentBookId) return; const cur = group.classList.contains('is-read'); await fetchJSON(api(`/books/${currentBookId}/state`), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ read: !cur }) }); group.classList.toggle('is-read', !cur); await search(); });
+      document.getElementById('btnPending').addEventListener('click', async ()=>{ if (!currentBookId) return; const cur = group.classList.contains('is-pending'); await fetchJSON(api(`/books/${currentBookId}/state`), { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ pending: !cur }) }); group.classList.toggle('is-pending', !cur); await search(); });
+    }
+    group.classList.toggle('is-fav', !!detail.favorite);
+    group.classList.toggle('is-read', !!detail.read);
+    group.classList.toggle('is-pending', !!detail.pending);
+  }
+
+  // Initialize app
+  async function init() {
+    loadBookmarks();
+    loadNotes();
+  }
+
+  // Start the app
+  document.addEventListener('DOMContentLoaded', init);
+  
+  // --- Server info and settings UI ---
+  async function loadServerInfo(){
+    try{
+      const s = await fetchJSON(api('/api/server-info'));
+      const url = s.lan_ip ? `http://${s.lan_ip}:${s.port || window.location.port || 8000}` : window.location.origin;
+      document.getElementById('serverUrl').textContent = url;
+    }catch(e){ /* ignore */ }
+  }
+
+  document.getElementById('btnServerInfo').addEventListener('click', ()=>{ loadServerInfo(); showMessage('Server: '+document.getElementById('serverUrl').textContent); });
+  const _btnToggle = document.getElementById('btnToggleResults');
+  if(_btnToggle){
+    // initialize state from localStorage
+    if(localStorage.getItem('archive.results.hidden') === '1') document.body.classList.add('results-hidden');
+    _btnToggle.addEventListener('click', ()=>{
+      const hidden = document.body.classList.toggle('results-hidden');
+      localStorage.setItem('archive.results.hidden', hidden ? '1' : '0');
+    });
+  }
+  document.getElementById('btnExport').addEventListener('click', ()=>{
+    const blob = new Blob([JSON.stringify(state.items, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = 'the-archive-books.json';
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+    showMessage(`${state.items.length} libros exportados`, 'success');
+  });
+
+  // legacy settings button removed — use the inline editor/modal instead
+
+  // Load server info at startup
+  loadServerInfo();
+  </script>
+</body>
+</html>

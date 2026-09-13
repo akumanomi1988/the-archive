@@ -1,0 +1,12 @@
+{
+  "library_path": "./biblioteca",
+  "db_path": "./skald.db",
+  "metadata_provider": "openlibrary",
+  "metadata_api_url": "https://openlibrary.org/search.json",
+  "metadata_timeout_seconds": 20,
+  "metadata_min_match_score": 0.55,
+  "metadata_throttle_ms": 1100,
+  "cors_origins": ["*"],
+  "page_size_default": 20,
+  "enrichment_batch_size": 10
+}

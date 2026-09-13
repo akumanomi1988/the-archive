@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>The Archive — E-Book (simple)</title>
+  <link rel="stylesheet" href="/frontend/style.css">
+</head>
+<body>
+  <main style="max-width:720px;margin:1rem auto;padding:1rem;">
+    <h1 style="font-size:1.125rem;margin-bottom:.5rem">The Archive — E-Book (simple)</h1>
+    <p style="color:#6b7280;margin:.25rem 0 1rem">Página ligera para navegadores antiguos y lectores de e-ink. Usa búsqueda mínima de 3 letras.</p>
+    <form id="searchForm" action="#" onsubmit="return false;">
+      <label style="display:block;margin-bottom:.5rem">Título
+        <input id="titulo" name="titulo" type="text" style="width:100%;padding:.5rem;margin-top:.25rem;border:1px solid #d1d5db;border-radius:6px;">
+      </label>
+      <label style="display:block;margin-bottom:.5rem">Autor
+        <input id="autor" name="autor" type="text" style="width:100%;padding:.5rem;margin-top:.25rem;border:1px solid #d1d5db;border-radius:6px;">
+      </label>
+      <div style="display:flex;gap:.5rem;margin-top:.5rem">
+        <button id="btnSearch" class="btn primary" type="button">Buscar</button>
+        <button id="btnClear" class="btn" type="button">Limpiar</button>
+      </div>
+    </form>
+    <div id="msg" style="margin-top:.75rem;color:#6b7280"></div>
+    <ul id="results" style="list-style:none;padding:0;margin-top:1rem"></ul>
+    <p style="color:#9ca3af;font-size:.9rem;margin-top:1rem">Esta interfaz está pensada para navegadores muy simples; si tienes un navegador moderno, usa la interfaz completa.</p>
+  </main>
+  <script src="/frontend/app.js"></script>
+</body>
+</html>

@@ -16,6 +16,7 @@ __pycache__/
 .vscode/
 .vscode-insiders/
 .history/
+.vs/
 
 # OS
 .DS_Store
@@ -37,6 +38,10 @@ node_modules/
 # Build artifacts
 build/
 dist/
+**/bin/
+**/obj/
+**/publish/
+**/publish-test/
 
 tmp/
 *.tmp
@@ -57,6 +62,10 @@ Books/
 *.azw
 *.azw3
 *.pdf
+
+# EPUB de prueba versionado para validar el flujo .NET
+!TheArchive.DotNet/biblioteca/
+!TheArchive.DotNet/biblioteca/The Archive - EPUB de prueba.epub
 
 # Cache
 .cache/

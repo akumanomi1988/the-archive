@@ -1,0 +1,8 @@
+/* Minimal shared styles for frontend/ebook.html — conservative for old browsers */
+html,body{height:100%;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;background:#fff;color:#111}
+.btn{display:inline-block;padding:.5rem .75rem;border-radius:8px;border:1px solid #d1d5db;background:#f8fafc;color:#111;cursor:pointer}
+.btn.primary{background:#0a84ff;color:#fff;border-color:#0a84ff}
+input[type=text]{box-sizing:border-box}
+ul#results li{border:1px solid #e5e7eb;border-radius:8px;padding:.75rem;margin-bottom:.6rem}
+a.download{display:inline-block;padding:.35rem .6rem;background:#e6f0ff;border:1px solid #cfe1ff;border-radius:6px;color:#034ea2;text-decoration:none}
+@media (max-width:420px){ main{padding:.75rem;margin:0;} }

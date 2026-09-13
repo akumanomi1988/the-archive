@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Archive - versión clásica</title>
+  <style type="text/css">
+    body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f2efe7;color:#222;font-size:16px;line-height:1.45}
+    #page{width:92%;max-width:850px;margin:0 auto;padding:16px 0}.header{border-bottom:3px solid #634832;margin-bottom:18px}.header h1{margin:0;color:#38291e}.note{background:#fff8d5;border:1px solid #d7c887;padding:8px}
+    fieldset{background:#fff;border:1px solid #aaa;padding:12px;margin:0 0 16px}label{display:block;font-weight:bold;margin-top:8px}input{font:inherit;width:96%;padding:7px;border:1px solid #777}button,.button{font:inherit;display:inline-block;background:#634832;color:#fff;border:0;padding:8px 13px;margin:10px 6px 0 0;text-decoration:none;cursor:pointer}
+    .book{background:#fff;border:1px solid #aaa;margin:10px 0;padding:12px}.book h2{font-size:19px;margin:0 0 4px}.author{color:#555}.status{padding:10px;background:#e8e8e8}.error{color:#900;font-weight:bold}.nav{text-align:center;margin:15px}.small{font-size:13px;color:#555}
+  </style>
+</head>
+<body><div id="page">
+  <div class="header"><h1>The Archive</h1><p>Catálogo clásico para navegadores antiguos y lectores electrónicos</p></div>
+  <p class="note"><a href="/">Abrir la versión moderna</a>. Esta página evita JavaScript moderno, fuentes externas, animaciones e imágenes pesadas.</p>
+  <form id="searchForm" action="/legacy" method="get">
+    <fieldset><legend>Buscar libros</legend>
+      <label for="titulo">Título (3 caracteres como mínimo)</label><input type="text" id="titulo" name="titulo">
+      <label for="autor">Autor (3 caracteres como mínimo)</label><input type="text" id="autor" name="autor">
+      <button type="submit">Buscar</button><button type="button" id="clear">Limpiar</button>
+    </fieldset>
+  </form>
+  <div id="status" class="status">Escribe un título o un autor.</div><div id="results"></div><div id="nav" class="nav"></div>
+  <p class="small">Compatible con XMLHttpRequest y ECMAScript 3. Los EPUB admiten descargas parciales.</p>
+</div>
+<script type="text/javascript">
+(function(){
+  var page=1,pageSize=25,total=0;
+  function byId(id){return document.getElementById(id);}
+  function esc(s){var d=document.createElement('div');d.appendChild(document.createTextNode(s==null?'':String(s)));return d.innerHTML;}
+  function request(url,done){var x;if(window.XMLHttpRequest){x=new XMLHttpRequest();}else{x=new ActiveXObject('Microsoft.XMLHTTP');}x.onreadystatechange=function(){if(x.readyState===4){if(x.status>=200&&x.status<300){try{done(null,eval('('+x.responseText+')'));}catch(e){done(e);}}else{done(new Error('HTTP '+x.status));}}};x.open('GET',url,true);x.send(null);}
+  function value(id){return byId(id).value.replace(/^\s+|\s+$/g,'');}
+  function search(newPage){var t=value('titulo'),a=value('autor');if((t&&t.length<3)||(a&&a.length<3)){byId('status').innerHTML='<span class="error">Escribe al menos 3 caracteres.</span>';return;}if(!t&&!a){byId('status').innerHTML='Escribe un título o un autor.';byId('results').innerHTML='';return;}page=newPage||1;byId('status').innerHTML='Buscando...';var url='/ebook/search?titulo='+encodeURIComponent(t)+'&autor='+encodeURIComponent(a)+'&page='+page+'&page_size='+pageSize;request(url,function(err,data){if(err){byId('status').innerHTML='<span class="error">No se pudo realizar la búsqueda.</span>';return;}total=data.total;byId('status').innerHTML=total+' libro(s) encontrado(s). Página '+page+'.';var html='';for(var i=0;i<data.items.length;i++){var b=data.items[i];html+='<div class="book"><h2>'+esc(b.title)+'</h2><div class="author">'+esc(b.author)+'</div><a class="button" href="/ebook/raw/'+b.id+'.epub">Descargar EPUB</a> <a class="button" href="/open/'+b.id+'">Leer texto</a></div>';}byId('results').innerHTML=html||'<p>No hay resultados.</p>';var n='';if(page>1)n+='<button type="button" id="prev">Anterior</button>';if(page*pageSize<total)n+='<button type="button" id="next">Siguiente</button>';byId('nav').innerHTML=n;if(byId('prev'))byId('prev').onclick=function(){search(page-1);};if(byId('next'))byId('next').onclick=function(){search(page+1);};});}
+  byId('searchForm').onsubmit=function(){search(1);return false;};byId('clear').onclick=function(){byId('titulo').value='';byId('autor').value='';byId('results').innerHTML='';byId('nav').innerHTML='';byId('status').innerHTML='Escribe un título o un autor.';};
+}());
+</script></body></html>
